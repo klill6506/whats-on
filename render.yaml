@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: whats-on
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_PATH
+        value: "/var/data/whats_on.db"
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
