@@ -8,7 +8,6 @@
     <meta name="theme-color" content="#1f2937">
     <title>What's On?</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="manifest" href="/manifest.json">
     <style>
         body { 
             -webkit-tap-highlight-color: transparent;
@@ -27,6 +26,35 @@
         .show-card:active {
             transform: scale(0.98);
         }
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 50;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: #1f2937;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 320px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
     </style>
 </head>
 <body class="text-gray-100 p-4 pb-20">
@@ -44,7 +72,7 @@
             {% for show in tonight %}
             <div class="show-card rounded-xl p-4 transition-transform">
                 <div class="flex justify-between items-start">
-                    <div class="flex-1">
+                    <div class="flex-1 cursor-pointer" onclick="openEdit({{ show.id }}, '{{ show.title }}', {{ show.current_season }}, {{ show.current_episode }})">
                         <h3 class="font-semibold text-white text-lg">{{ show.title }}</h3>
                         <div class="flex items-center gap-2 mt-1">
                             <span class="service-badge rounded-full 
@@ -63,12 +91,17 @@
                             {% endif %}
                         </div>
                     </div>
-                    <div class="text-right">
+                    <div class="text-right flex items-center gap-2">
                         {% if show.current_episode == 99 %}
                         <span class="text-emerald-400 text-sm">✓ Current</span>
                         {% else %}
                         <span class="text-gray-300 text-sm">S{{ show.current_season }}E{{ show.current_episode }}</span>
                         {% endif %}
+                        <form action="/next-episode/{{ show.id }}" method="POST" class="inline">
+                            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold w-8 h-8 rounded-full">
+                                +1
+                            </button>
+                        </form>
                     </div>
                 </div>
                 {% if show.notes %}
@@ -89,7 +122,7 @@
             {% for show in catching_up %}
             <div class="show-card rounded-xl p-4 transition-transform">
                 <div class="flex justify-between items-start">
-                    <div class="flex-1">
+                    <div class="flex-1 cursor-pointer" onclick="openEdit({{ show.id }}, '{{ show.title }}', {{ show.current_season }}, {{ show.current_episode }})">
                         <h3 class="font-semibold text-white text-lg">{{ show.title }}</h3>
                         <div class="flex items-center gap-2 mt-1">
                             <span class="service-badge rounded-full 
@@ -108,10 +141,10 @@
                             {% endif %}
                         </div>
                     </div>
-                    <div class="text-right">
+                    <div class="text-right flex items-center gap-2">
                         <span class="text-amber-300 font-medium">S{{ show.current_season }}E{{ show.current_episode }}</span>
-                        <form action="/next-episode/{{ show.id }}" method="POST" class="inline ml-2">
-                            <button type="submit" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-2 py-1 rounded">
+                        <form action="/next-episode/{{ show.id }}" method="POST" class="inline">
+                            <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold w-8 h-8 rounded-full">
                                 +1
                             </button>
                         </form>
@@ -133,10 +166,78 @@
     </section>
     {% endif %}
 
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h3 id="editTitle" class="text-lg font-bold text-white mb-4">Edit Show</h3>
+            <form id="editForm" method="POST">
+                <div class="flex gap-4 mb-4">
+                    <div class="flex-1">
+                        <label class="block text-gray-400 text-xs mb-1">Season</label>
+                        <input type="number" name="season" id="editSeason" min="1" 
+                            class="w-full bg-gray-800 text-white text-xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-gray-400 text-xs mb-1">Episode</label>
+                        <input type="number" name="episode" id="editEpisode" min="1"
+                            class="w-full bg-gray-800 text-white text-xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="closeEdit()" 
+                        class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit" 
+                        class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-medium">
+                        Save
+                    </button>
+                </div>
+                <button type="button" onclick="markCaughtUp()" 
+                    class="w-full mt-2 text-emerald-400 text-sm py-2 hover:underline">
+                    Mark as Caught Up ✓
+                </button>
+            </form>
+        </div>
+    </div>
+
     <footer class="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur border-t border-gray-800 p-3">
         <p class="text-center text-gray-500 text-xs">
-            Tell Henry what you watched 🦉
+            Tap show to edit • +1 to mark watched
         </p>
     </footer>
+
+    <script>
+        let currentShowId = null;
+
+        function openEdit(id, title, season, episode) {
+            currentShowId = id;
+            document.getElementById('editTitle').textContent = title;
+            document.getElementById('editSeason').value = season;
+            document.getElementById('editEpisode').value = episode === 99 ? 1 : episode;
+            document.getElementById('editForm').action = '/edit-show/' + id;
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        function closeEdit() {
+            document.getElementById('editModal').classList.remove('active');
+            currentShowId = null;
+        }
+
+        function markCaughtUp() {
+            if (currentShowId) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/mark-caught-up/' + currentShowId;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        // Close modal on background click
+        document.getElementById('editModal').addEventListener('click', function(e) {
+            if (e.target === this) closeEdit();
+        });
+    </script>
 </body>
 </html>

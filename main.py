@@ -112,6 +112,11 @@ async def next_episode(show_id: int):
         db.update_show(show_id, current_episode=new_ep)
     return RedirectResponse(url="/", status_code=303)
 
+@app.post("/edit-show/{show_id}")
+async def edit_show(show_id: int, season: int = Form(...), episode: int = Form(...)):
+    db.update_show(show_id, current_season=season, current_episode=episode, status="watching")
+    return RedirectResponse(url="/", status_code=303)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8005)
