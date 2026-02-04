@@ -118,13 +118,14 @@ def seed_kens_shows():
     shows = [
         # (title, service, season, episode, air_day, priority, notes, status)
         ("The Pitt", "Max", 1, 99, "Thursday", 1, "Caught up - new eps weekly", "current"),
-        ("Shrinking", "Apple TV+", 3, 99, "Wednesday", 1, "Caught up", "current"),
+        ("Shrinking", "Apple TV+", 3, 99, "Tuesday", 1, "Caught up", "current"),
+        ("Hijack", "Apple TV+", 2, 99, "Tuesday", 1, "S2 through March 4", "current"),
         ("Will Trent", "Hulu", 4, 99, "Tuesday", 3, "Watch if nothing else on", "current"),
         ("Law & Order", "Peacock", 25, 99, "Thursday", 2, "Caught up-ish", "current"),
         ("Trying", "Apple TV+", 4, 2, None, 2, "Catching up", "watching"),
-        ("Bad Sisters", "Apple TV+", 2, 4, None, 1, "Restarted S2", "watching"),
+        ("Bad Sisters", "Apple TV+", 2, 6, None, 1, "S2 in progress", "watching"),
         ("Annika", "Prime Video", 1, 2, None, 1, "Bought on Prime", "watching"),
-        ("Landman", "Paramount+", 1, 99, None, 2, "Almost caught up", "watching"),
+        ("Landman", "Paramount+", 1, 99, None, 2, "S1 complete - S2 TBD", "current"),
         ("High Potential", "Hulu", 1, 99, "Tuesday", 3, "Watch if nothing else on", "current"),
         ("Endeavour", "Prime Video", 7, 1, "Weekend", 2, "Weekend show, nap-friendly", "watching"),
     ]
