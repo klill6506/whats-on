@@ -125,7 +125,7 @@ def seed_kens_shows():
         ("Trying", "Apple TV+", 4, 2, None, 2, "Catching up", "watching"),
         ("Bad Sisters", "Apple TV+", 2, 6, None, 1, "S2 in progress", "watching"),
         ("Annika", "Prime Video", 1, 2, None, 1, "Bought on Prime", "watching"),
-        ("Landman", "Paramount+", 1, 99, None, 2, "S1 complete - S2 TBD", "current"),
+        ("Landman", "Paramount+", 1, 99, None, 2, "S1 complete - S2 TBD", "hiatus"),
         ("High Potential", "Hulu", 1, 99, "Tuesday", 3, "Watch if nothing else on", "current"),
         ("Endeavour", "Prime Video", 7, 1, "Weekend", 2, "Weekend show, nap-friendly", "watching"),
     ]

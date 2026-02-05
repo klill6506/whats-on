@@ -22,6 +22,7 @@ async def home(request: Request):
     # Categorize shows
     tonight = []  # Current shows with new episodes / ready to watch
     catching_up = []  # Shows we're behind on
+    between_seasons = []  # Shows on hiatus
     
     day_order = {
         "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
@@ -29,7 +30,9 @@ async def home(request: Request):
     }
     
     for show in shows:
-        if show['status'] == 'current' or show['current_episode'] == 99:
+        if show['status'] == 'hiatus':
+            between_seasons.append(show)
+        elif show['status'] == 'current' or show['current_episode'] == 99:
             tonight.append(show)
         else:
             catching_up.append(show)
@@ -40,7 +43,8 @@ async def home(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "tonight": tonight,
-        "catching_up": catching_up
+        "catching_up": catching_up,
+        "between_seasons": between_seasons
     })
 
 @app.get("/api/shows")
@@ -115,6 +119,16 @@ async def next_episode(show_id: int):
 @app.post("/edit-show/{show_id}")
 async def edit_show(show_id: int, season: int = Form(...), episode: int = Form(...)):
     db.update_show(show_id, current_season=season, current_episode=episode, status="watching")
+    return RedirectResponse(url="/", status_code=303)
+
+@app.post("/mark-hiatus/{show_id}")
+async def mark_hiatus(show_id: int):
+    db.update_show(show_id, status="hiatus")
+    return RedirectResponse(url="/", status_code=303)
+
+@app.post("/mark-active/{show_id}")
+async def mark_active(show_id: int):
+    db.update_show(show_id, status="current", current_episode=99)
     return RedirectResponse(url="/", status_code=303)
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@
 <body class="text-gray-100 p-4 pb-20">
     <header class="mb-6">
         <h1 class="text-2xl font-bold text-white">📺 What's On?</h1>
-        <p class="text-gray-400 text-sm">{{ tonight|length + catching_up|length }} shows tracked</p>
+        <p class="text-gray-400 text-sm">{{ tonight|length + catching_up|length }} active, {{ between_seasons|length }} between seasons</p>
     </header>
 
     {% if tonight %}
@@ -166,6 +166,49 @@
     </section>
     {% endif %}
 
+    {% if between_seasons %}
+    <section class="mb-8">
+        <h2 class="text-lg font-semibold text-gray-500 mb-3 flex items-center gap-2">
+            <span>💤</span> Between Seasons
+        </h2>
+        <div class="space-y-3">
+            {% for show in between_seasons %}
+            <div class="show-card rounded-xl p-4 transition-transform opacity-60">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-white text-lg">{{ show.title }}</h3>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span class="service-badge rounded-full 
+                                {% if show.service == 'Max' %}bg-blue-600
+                                {% elif show.service == 'Apple TV+' %}bg-gray-600
+                                {% elif show.service == 'Hulu' %}bg-green-600
+                                {% elif show.service == 'Peacock' %}bg-yellow-600 text-black
+                                {% elif show.service == 'Paramount+' %}bg-blue-800
+                                {% elif show.service == 'Prime Video' %}bg-cyan-700
+                                {% else %}bg-purple-600{% endif %}
+                                text-white font-medium">
+                                {{ show.service }}
+                            </span>
+                            <span class="text-gray-500 text-xs">S{{ show.current_season }} complete</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <form action="/mark-active/{{ show.id }}" method="POST" class="inline">
+                            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1 rounded-full">
+                                New season! 🎉
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% if show.notes %}
+                <p class="text-gray-500 text-xs mt-2">{{ show.notes }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
         <div class="modal-content">
@@ -196,6 +239,10 @@
                 <button type="button" onclick="markCaughtUp()" 
                     class="w-full mt-2 text-emerald-400 text-sm py-2 hover:underline">
                     Mark as Caught Up ✓
+                </button>
+                <button type="button" onclick="markHiatus()" 
+                    class="w-full mt-1 text-gray-400 text-sm py-2 hover:underline">
+                    Season over 💤
                 </button>
             </form>
         </div>
@@ -229,6 +276,16 @@
                 const form = document.createElement('form');
                 form.method = 'POST';
                 form.action = '/mark-caught-up/' + currentShowId;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        function markHiatus() {
+            if (currentShowId) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/mark-hiatus/' + currentShowId;
                 document.body.appendChild(form);
                 form.submit();
             }
