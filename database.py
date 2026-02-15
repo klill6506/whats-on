@@ -6,17 +6,17 @@ from contextlib import contextmanager
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
-    # PostgreSQL mode
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
+    # PostgreSQL mode (psycopg3)
+    import psycopg
+    from psycopg.rows import dict_row
     
-    # Render uses postgres:// but psycopg2 needs postgresql://
+    # Render uses postgres:// but psycopg needs postgresql://
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     
     @contextmanager
     def get_db():
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
         try:
             yield conn
             conn.commit()
