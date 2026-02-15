@@ -399,6 +399,13 @@
                         Cancel
                     </button>
                 </div>
+                
+                <div class="pt-3 mt-3 border-t border-gray-700">
+                    <button type="button" onclick="deleteShow()" 
+                        class="w-full text-red-400 text-xs py-2 hover:text-red-300 hover:bg-red-900/20 rounded">
+                        🗑️ Delete Show
+                    </button>
+                </div>
             </form>
         </div>
     </div>
@@ -504,6 +511,18 @@
         function closeEdit() {
             document.getElementById('editModal').classList.remove('active');
             currentShowId = null;
+        }
+
+        function deleteShow() {
+            if (!currentShowId) return;
+            const title = document.getElementById('editTitle').textContent;
+            if (confirm(`Delete "${title}"? This cannot be undone.`)) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/delete-show/' + currentShowId;
+                document.body.appendChild(form);
+                form.submit();
+            }
         }
 
         function quickAction(action) {

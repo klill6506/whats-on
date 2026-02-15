@@ -186,6 +186,11 @@ async def mark_active(show_id: int):
         )
     return RedirectResponse(url="/", status_code=303)
 
+@app.post("/delete-show/{show_id}")
+async def delete_show_ui(show_id: int):
+    db.delete_show(show_id)
+    return RedirectResponse(url="/", status_code=303)
+
 # Fetch poster for existing show
 @app.post("/api/shows/{show_id}/fetch-poster")
 async def fetch_poster(show_id: int):
