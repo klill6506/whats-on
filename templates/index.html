@@ -307,6 +307,23 @@
     </section>
     {% endif %}
 
+    <!-- Recommendations Row -->
+    <section id="recsSection" class="mb-8 hidden">
+        <h2 class="section-title">
+            <span class="text-purple-400">💡</span> Recommended For You
+            <button onclick="loadRecommendations()" class="ml-auto text-xs text-gray-500 hover:text-white">↻ Refresh</button>
+        </h2>
+        <div id="recsRow" class="show-row">
+            <!-- Populated by JavaScript -->
+        </div>
+    </section>
+
+    <div class="mb-8 text-center">
+        <button id="loadRecsBtn" onclick="loadRecommendations()" class="text-purple-400 hover:text-purple-300 text-sm">
+            💡 Load Recommendations
+        </button>
+    </div>
+
     {% if between_seasons %}
     <section class="mb-8">
         <h2 class="section-title">
@@ -575,21 +592,103 @@
         }
 
         async function showRecommendations() {
+            // Now just calls loadRecommendations
+            loadRecommendations();
+        }
+
+        async function loadRecommendations() {
+            const section = document.getElementById('recsSection');
+            const row = document.getElementById('recsRow');
+            const loadBtn = document.getElementById('loadRecsBtn');
+            
+            loadBtn.textContent = '⏳ Loading...';
+            
             try {
                 const response = await fetch('/api/recommendations');
                 const data = await response.json();
                 
                 if (data.recommendations && data.recommendations.length > 0) {
-                    let msg = `Based on your taste (${data.based_on_genres.join(', ')}):\n\n`;
-                    data.recommendations.forEach((show, i) => {
-                        msg += `${i + 1}. ${show.title} (${show.year || 'N/A'})\n`;
+                    row.innerHTML = data.recommendations.map(show => `
+                        <div class="show-card rec-card" style="border: 2px solid #a855f7;">
+                            ${show.poster_url 
+                                ? `<img src="${show.poster_url}" alt="${show.title}" class="show-poster">`
+                                : `<div class="show-poster-placeholder">📺</div>`
+                            }
+                            <div class="show-info">
+                                <div class="show-title">${show.title}</div>
+                                <div class="show-meta">${show.year || ''}</div>
+                            </div>
+                            <div class="rec-actions" style="position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); display:none; flex-direction:column; justify-content:center; align-items:center; gap:8px; padding:10px;">
+                                <button onclick="addRec('${show.title}', '${show.trakt_slug}')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg w-full">+ Add to List</button>
+                                <button onclick="dismissRec('${show.trakt_slug}', this)" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg w-full">Already Seen</button>
+                                <button onclick="dismissRec('${show.trakt_slug}', this)" class="text-gray-400 hover:text-white text-xs py-1">Not Interested</button>
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    // Add hover behavior
+                    document.querySelectorAll('.rec-card').forEach(card => {
+                        card.addEventListener('click', function(e) {
+                            if (!e.target.closest('button')) {
+                                const actions = this.querySelector('.rec-actions');
+                                actions.style.display = actions.style.display === 'flex' ? 'none' : 'flex';
+                            }
+                        });
                     });
-                    alert(msg);
+                    
+                    section.classList.remove('hidden');
+                    loadBtn.classList.add('hidden');
                 } else {
-                    alert('No recommendations found. Add more shows first!');
+                    loadBtn.textContent = 'No recommendations right now';
                 }
             } catch (err) {
-                alert('Error getting recommendations');
+                loadBtn.textContent = '❌ Error loading';
+                setTimeout(() => { loadBtn.textContent = '💡 Load Recommendations'; }, 2000);
+            }
+        }
+
+        async function addRec(title, trakt_slug) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/api/recommendations/add';
+            
+            const titleInput = document.createElement('input');
+            titleInput.name = 'title';
+            titleInput.value = title;
+            form.appendChild(titleInput);
+            
+            const slugInput = document.createElement('input');
+            slugInput.name = 'trakt_slug';
+            slugInput.value = trakt_slug;
+            form.appendChild(slugInput);
+            
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        async function dismissRec(trakt_slug, btn) {
+            const card = btn.closest('.rec-card');
+            card.style.opacity = '0.3';
+            
+            const formData = new FormData();
+            formData.append('trakt_slug', trakt_slug);
+            
+            try {
+                await fetch('/api/recommendations/dismiss', {
+                    method: 'POST',
+                    body: formData
+                });
+                card.remove();
+                
+                // If no more recs, hide section
+                const remaining = document.querySelectorAll('.rec-card').length;
+                if (remaining === 0) {
+                    document.getElementById('recsSection').classList.add('hidden');
+                    document.getElementById('loadRecsBtn').classList.remove('hidden');
+                    document.getElementById('loadRecsBtn').textContent = '💡 Load Recommendations';
+                }
+            } catch (err) {
+                card.style.opacity = '1';
             }
         }
     </script>

@@ -47,6 +47,16 @@ def init_db():
         conn.commit()
     except:
         pass  # Column already exists
+    
+    # Create dismissed recommendations table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dismissed_recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trakt_slug TEXT UNIQUE NOT NULL,
+            dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
     conn.close()
 
 def get_all_shows():
@@ -111,6 +121,21 @@ def delete_show(show_id):
     conn.execute("DELETE FROM watch_history WHERE show_id = ?", (show_id,))
     conn.commit()
     conn.close()
+
+def dismiss_recommendation(trakt_slug):
+    conn = get_db()
+    try:
+        conn.execute("INSERT INTO dismissed_recommendations (trakt_slug) VALUES (?)", (trakt_slug,))
+        conn.commit()
+    except:
+        pass  # Already dismissed
+    conn.close()
+
+def get_dismissed_recommendations():
+    conn = get_db()
+    dismissed = conn.execute("SELECT * FROM dismissed_recommendations").fetchall()
+    conn.close()
+    return [dict(d) for d in dismissed]
 
 def seed_kens_shows():
     """Seed database with Ken's current watchlist"""

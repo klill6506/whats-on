@@ -374,8 +374,10 @@ async def fetch_all_trakt():
 
 @app.get("/api/recommendations")
 async def get_recommendations():
-    """Get show recommendations based on current shows"""
+    """Get show recommendations based on current shows, with posters"""
     shows = db.get_all_shows()
+    dismissed = db.get_dismissed_recommendations()
+    
     if not shows:
         return {"recommendations": [], "message": "Add some shows first!"}
     
@@ -402,23 +404,31 @@ async def get_recommendations():
             # Get popular shows in those genres
             resp = await client.get(
                 f"{TRAKT_BASE_URL}/shows/popular",
-                params={"genres": ",".join(top_genres), "limit": 10},
+                params={"genres": ",".join(top_genres), "limit": 20},
                 headers=trakt_headers()
             )
             popular = resp.json()
             
-            # Filter out shows Ken already has
+            # Filter out shows Ken already has and dismissed ones
             current_titles = {s['title'].lower() for s in shows}
+            dismissed_slugs = {d['trakt_slug'] for d in dismissed}
             
             for show in popular:
-                if show.get('title', '').lower() not in current_titles:
+                slug = show.get("ids", {}).get("slug")
+                title = show.get('title', '')
+                
+                if title.lower() not in current_titles and slug not in dismissed_slugs:
+                    # Fetch poster from TMDB
+                    _, poster_url = await search_tmdb(title)
+                    
                     recommendations.append({
-                        "title": show.get("title"),
+                        "title": title,
                         "year": show.get("year"),
-                        "trakt_slug": show.get("ids", {}).get("slug"),
-                        "overview": show.get("overview", "")[:200] if show.get("overview") else ""
+                        "trakt_slug": slug,
+                        "overview": show.get("overview", "")[:150] if show.get("overview") else "",
+                        "poster_url": poster_url
                     })
-                    if len(recommendations) >= 5:
+                    if len(recommendations) >= 6:
                         break
     except Exception as e:
         print(f"Recommendations error: {e}")
@@ -427,3 +437,42 @@ async def get_recommendations():
         "based_on_genres": top_genres,
         "recommendations": recommendations
     }
+
+@app.post("/api/recommendations/dismiss")
+async def dismiss_recommendation(trakt_slug: str = Form(...)):
+    """Dismiss a recommendation so it doesn't show again"""
+    db.dismiss_recommendation(trakt_slug)
+    return {"dismissed": True}
+
+@app.post("/api/recommendations/add")
+async def add_recommendation(
+    title: str = Form(...),
+    trakt_slug: str = Form(...),
+    service: str = Form("Other"),
+    priority: int = Form(2)
+):
+    """Add a recommended show to the watchlist"""
+    # Fetch poster
+    _, poster_url = await search_tmdb(title)
+    
+    # Get air day from Trakt
+    air_day = None
+    details = await get_trakt_show_details(trakt_slug)
+    if details:
+        air_day = details.get('air_day')
+    
+    show_id = db.add_show(
+        title=title,
+        service=service,
+        current_season=1,
+        current_episode=1,
+        air_day=air_day,
+        priority=priority,
+        status='watching',
+        poster_url=poster_url
+    )
+    
+    # Also dismiss it from recommendations
+    db.dismiss_recommendation(trakt_slug)
+    
+    return RedirectResponse(url="/", status_code=303)
