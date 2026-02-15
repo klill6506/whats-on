@@ -123,11 +123,11 @@
         }
         
         .service-max { background: #0052ff; }
-        .service-apple { background: linear-gradient(135deg, #fa233b, #fb5c74); }
+        .service-appletv { background: linear-gradient(135deg, #fa233b, #fb5c74); }
         .service-hulu { background: #1ce783; }
         .service-peacock { background: linear-gradient(135deg, #ffd700, #ff6b00); }
         .service-paramount { background: #0068ff; }
-        .service-prime { background: #00a8e1; }
+        .service-primevideo { background: #00a8e1; }
         .service-netflix { background: #e50914; }
         .service-disney { background: linear-gradient(135deg, #113ccf, #0063e5); }
         .service-other { background: #8b5cf6; }
@@ -193,21 +193,23 @@
     </style>
 </head>
 <body class="text-gray-100 px-4 pt-4 pb-24">
-    <header class="mb-6 flex justify-between items-center">
-        <div>
-            <h1 class="text-2xl font-bold text-white">What's On?</h1>
-            <p class="text-gray-500 text-sm">{{ priority_shows|length + backup_shows|length }} active shows</p>
-        </div>
-        <div class="flex gap-2 items-center">
-            <button onclick="toggleMenu()" class="bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded-lg text-sm">⋮</button>
+    <header class="mb-4">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-2">
+                <span class="text-3xl">🏔️</span>
+                <div>
+                    <h1 class="text-2xl font-bold text-white">What's On?</h1>
+                    <p class="text-gray-500 text-xs">{{ priority_shows|length + backup_shows|length }} active shows</p>
+                </div>
+            </div>
             <button onclick="openAddModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-sm font-medium">+ Add</button>
         </div>
         
-        <!-- Dropdown Menu -->
-        <div id="menuDropdown" class="hidden absolute right-4 top-16 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-2 z-50">
-            <button onclick="fetchAllPosters(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">🖼️ Get Posters</button>
-            <button onclick="fetchAllTrakt(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">📅 Get Air Days</button>
-            <button onclick="showRecommendations(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">💡 Recommendations</button>
+        <!-- Action buttons row -->
+        <div class="flex gap-2 overflow-x-auto pb-2">
+            <button onclick="fetchAllPosters()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🖼️ Posters</button>
+            <button onclick="fetchAllTrakt()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">📅 Air Days</button>
+            <button onclick="loadRecommendations()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">💡 Recommend</button>
         </div>
     </header>
 
@@ -322,12 +324,6 @@
             <!-- Populated by JavaScript -->
         </div>
     </section>
-
-    <div class="mb-8 text-center">
-        <button id="loadRecsBtn" onclick="loadRecommendations()" class="text-purple-400 hover:text-purple-300 text-sm">
-            💡 Load Recommendations
-        </button>
-    </div>
 
     {% if between_seasons %}
     <section class="mb-8">
@@ -586,20 +582,6 @@
             }
         }
 
-        function toggleMenu() {
-            const menu = document.getElementById('menuDropdown');
-            menu.classList.toggle('hidden');
-        }
-
-        // Close menu when clicking outside
-        document.addEventListener('click', function(e) {
-            const menu = document.getElementById('menuDropdown');
-            const menuBtn = e.target.closest('button');
-            if (!menu.contains(e.target) && (!menuBtn || menuBtn.textContent !== '⋮')) {
-                menu.classList.add('hidden');
-            }
-        });
-
         async function fetchAllTrakt() {
             try {
                 const response = await fetch('/api/fetch-all-trakt', { method: 'POST' });
@@ -616,16 +598,14 @@
         }
 
         async function showRecommendations() {
-            // Now just calls loadRecommendations
             loadRecommendations();
         }
 
         async function loadRecommendations() {
             const section = document.getElementById('recsSection');
             const row = document.getElementById('recsRow');
-            const loadBtn = document.getElementById('loadRecsBtn');
             
-            loadBtn.textContent = '⏳ Loading...';
+            row.innerHTML = '<div class="text-gray-500 text-sm p-4">Loading recommendations...</div>';
             
             try {
                 const response = await fetch('/api/recommendations');
@@ -661,13 +641,13 @@
                     });
                     
                     section.classList.remove('hidden');
-                    loadBtn.classList.add('hidden');
                 } else {
-                    loadBtn.textContent = 'No recommendations right now';
+                    row.innerHTML = '<div class="text-gray-500 text-sm p-4">No recommendations right now. Add more shows!</div>';
+                    section.classList.remove('hidden');
                 }
             } catch (err) {
-                loadBtn.textContent = '❌ Error loading';
-                setTimeout(() => { loadBtn.textContent = '💡 Load Recommendations'; }, 2000);
+                row.innerHTML = '<div class="text-red-400 text-sm p-4">Error loading recommendations</div>';
+                section.classList.remove('hidden');
             }
         }
 
@@ -704,12 +684,10 @@
                 });
                 card.remove();
                 
-                // If no more recs, hide section
+                // If no more recs, show message
                 const remaining = document.querySelectorAll('.rec-card').length;
                 if (remaining === 0) {
-                    document.getElementById('recsSection').classList.add('hidden');
-                    document.getElementById('loadRecsBtn').classList.remove('hidden');
-                    document.getElementById('loadRecsBtn').textContent = '💡 Load Recommendations';
+                    document.getElementById('recsRow').innerHTML = '<div class="text-gray-500 text-sm p-4">Click "Recommend" for more suggestions</div>';
                 }
             } catch (err) {
                 card.style.opacity = '1';
