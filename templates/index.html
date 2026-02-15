@@ -123,12 +123,13 @@
         }
         
         .service-max { background: #0052ff; }
-        .service-apple { background: #555; }
+        .service-apple { background: linear-gradient(135deg, #fa233b, #fb5c74); }
         .service-hulu { background: #1ce783; }
-        .service-peacock { background: #ffd700; }
+        .service-peacock { background: linear-gradient(135deg, #ffd700, #ff6b00); }
         .service-paramount { background: #0068ff; }
         .service-prime { background: #00a8e1; }
         .service-netflix { background: #e50914; }
+        .service-disney { background: linear-gradient(135deg, #113ccf, #0063e5); }
         .service-other { background: #8b5cf6; }
 
         .section-title {
@@ -224,7 +225,7 @@
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
                 
-                {% if show.air_day and show.current_episode == 99 %}
+                {% if show.air_day %}
                 <div class="show-new-badge">{{ show.air_day[:3] }}</div>
                 {% endif %}
                 
@@ -257,6 +258,10 @@
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
+                {% endif %}
+                
+                {% if show.air_day %}
+                <div class="show-new-badge">{{ show.air_day[:3] }}</div>
                 {% endif %}
                 
                 <div class="show-progress">

@@ -1,153 +1,237 @@
-import sqlite3
 import os
-from datetime import datetime, date
-from pathlib import Path
+from datetime import datetime
+from contextlib import contextmanager
 
-DB_PATH = os.environ.get("DATABASE_PATH", "whats_on.db")
+# Check for PostgreSQL (Render) or SQLite (local)
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS shows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            service TEXT NOT NULL,
-            status TEXT DEFAULT 'watching',
-            current_season INTEGER DEFAULT 1,
-            current_episode INTEGER DEFAULT 1,
-            total_seasons INTEGER,
-            episodes_in_season INTEGER,
-            air_day TEXT,
-            priority INTEGER DEFAULT 2,
-            notes TEXT,
-            tmdb_id INTEGER,
-            poster_url TEXT,
-            trakt_slug TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS watch_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            show_id INTEGER NOT NULL,
-            season INTEGER NOT NULL,
-            episode INTEGER NOT NULL,
-            watched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (show_id) REFERENCES shows(id)
-        );
-    """)
-    # Add trakt_slug column if it doesn't exist (migration)
-    try:
-        conn.execute("ALTER TABLE shows ADD COLUMN trakt_slug TEXT")
-        conn.commit()
-    except:
-        pass  # Column already exists
+if DATABASE_URL:
+    # PostgreSQL mode
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
     
-    # Create dismissed recommendations table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS dismissed_recommendations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trakt_slug TEXT UNIQUE NOT NULL,
-            dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # Render uses postgres:// but psycopg2 needs postgresql://
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    
+    @contextmanager
+    def get_db():
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def init_db():
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS shows (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    service TEXT NOT NULL,
+                    status TEXT DEFAULT 'watching',
+                    current_season INTEGER DEFAULT 1,
+                    current_episode INTEGER DEFAULT 1,
+                    total_seasons INTEGER,
+                    episodes_in_season INTEGER,
+                    air_day TEXT,
+                    priority INTEGER DEFAULT 2,
+                    notes TEXT,
+                    tmdb_id INTEGER,
+                    poster_url TEXT,
+                    trakt_slug TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE TABLE IF NOT EXISTS watch_history (
+                    id SERIAL PRIMARY KEY,
+                    show_id INTEGER NOT NULL REFERENCES shows(id),
+                    season INTEGER NOT NULL,
+                    episode INTEGER NOT NULL,
+                    watched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE TABLE IF NOT EXISTS dismissed_recommendations (
+                    id SERIAL PRIMARY KEY,
+                    trakt_slug TEXT UNIQUE NOT NULL,
+                    dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+    
+    def _dict(row):
+        return dict(row) if row else None
+
+else:
+    # SQLite mode (local development)
+    import sqlite3
+    
+    DB_PATH = os.environ.get("DATABASE_PATH", "whats_on.db")
+    
+    @contextmanager
+    def get_db():
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def init_db():
+        with get_db() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS shows (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    service TEXT NOT NULL,
+                    status TEXT DEFAULT 'watching',
+                    current_season INTEGER DEFAULT 1,
+                    current_episode INTEGER DEFAULT 1,
+                    total_seasons INTEGER,
+                    episodes_in_season INTEGER,
+                    air_day TEXT,
+                    priority INTEGER DEFAULT 2,
+                    notes TEXT,
+                    tmdb_id INTEGER,
+                    poster_url TEXT,
+                    trakt_slug TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE TABLE IF NOT EXISTS watch_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    show_id INTEGER NOT NULL,
+                    season INTEGER NOT NULL,
+                    episode INTEGER NOT NULL,
+                    watched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (show_id) REFERENCES shows(id)
+                );
+                
+                CREATE TABLE IF NOT EXISTS dismissed_recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trakt_slug TEXT UNIQUE NOT NULL,
+                    dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+    
+    def _dict(row):
+        return dict(row) if row else None
+
+
+# ============ Common Functions ============
 
 def get_all_shows():
-    conn = get_db()
-    shows = conn.execute("""
-        SELECT * FROM shows 
-        WHERE status != 'dropped'
-        ORDER BY priority ASC, air_day ASC, title ASC
-    """).fetchall()
-    conn.close()
-    return [dict(s) for s in shows]
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM shows 
+            WHERE status != 'dropped'
+            ORDER BY priority ASC, air_day ASC, title ASC
+        """)
+        return [_dict(row) for row in cur.fetchall()]
 
 def get_show(show_id):
-    conn = get_db()
-    show = conn.execute("SELECT * FROM shows WHERE id = ?", (show_id,)).fetchone()
-    conn.close()
-    return dict(show) if show else None
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM shows WHERE id = %s" if DATABASE_URL else "SELECT * FROM shows WHERE id = ?", (show_id,))
+        return _dict(cur.fetchone())
 
 def add_show(title, service, current_season=1, current_episode=1, air_day=None, 
              priority=2, notes=None, status='watching', total_seasons=None, 
              episodes_in_season=None, tmdb_id=None, poster_url=None):
-    conn = get_db()
-    cursor = conn.execute("""
-        INSERT INTO shows (title, service, current_season, current_episode, air_day, 
-                          priority, notes, status, total_seasons, episodes_in_season,
-                          tmdb_id, poster_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (title, service, current_season, current_episode, air_day, priority, 
-          notes, status, total_seasons, episodes_in_season, tmdb_id, poster_url))
-    conn.commit()
-    show_id = cursor.lastrowid
-    conn.close()
-    return show_id
+    with get_db() as conn:
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("""
+                INSERT INTO shows (title, service, current_season, current_episode, air_day, 
+                                  priority, notes, status, total_seasons, episodes_in_season,
+                                  tmdb_id, poster_url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (title, service, current_season, current_episode, air_day, priority, 
+                  notes, status, total_seasons, episodes_in_season, tmdb_id, poster_url))
+            return cur.fetchone()['id']
+        else:
+            cur.execute("""
+                INSERT INTO shows (title, service, current_season, current_episode, air_day, 
+                                  priority, notes, status, total_seasons, episodes_in_season,
+                                  tmdb_id, poster_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (title, service, current_season, current_episode, air_day, priority, 
+                  notes, status, total_seasons, episodes_in_season, tmdb_id, poster_url))
+            return cur.lastrowid
 
 def update_show(show_id, **kwargs):
-    conn = get_db()
-    kwargs['updated_at'] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
-    values = list(kwargs.values()) + [show_id]
-    conn.execute(f"UPDATE shows SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        cur = conn.cursor()
+        kwargs['updated_at'] = datetime.now().isoformat()
+        
+        if DATABASE_URL:
+            set_clause = ", ".join(f"{k} = %s" for k in kwargs.keys())
+            values = list(kwargs.values()) + [show_id]
+            cur.execute(f"UPDATE shows SET {set_clause} WHERE id = %s", values)
+        else:
+            set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+            values = list(kwargs.values()) + [show_id]
+            cur.execute(f"UPDATE shows SET {set_clause} WHERE id = ?", values)
 
 def mark_watched(show_id, season, episode):
-    conn = get_db()
-    # Log to history
-    conn.execute("""
-        INSERT INTO watch_history (show_id, season, episode)
-        VALUES (?, ?, ?)
-    """, (show_id, season, episode))
-    # Update current position
-    conn.execute("""
-        UPDATE shows SET current_season = ?, current_episode = ?, updated_at = ?
-        WHERE id = ?
-    """, (season, episode + 1, datetime.now().isoformat(), show_id))
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("INSERT INTO watch_history (show_id, season, episode) VALUES (%s, %s, %s)", 
+                       (show_id, season, episode))
+            cur.execute("UPDATE shows SET current_season = %s, current_episode = %s, updated_at = %s WHERE id = %s",
+                       (season, episode + 1, datetime.now().isoformat(), show_id))
+        else:
+            cur.execute("INSERT INTO watch_history (show_id, season, episode) VALUES (?, ?, ?)", 
+                       (show_id, season, episode))
+            cur.execute("UPDATE shows SET current_season = ?, current_episode = ?, updated_at = ? WHERE id = ?",
+                       (season, episode + 1, datetime.now().isoformat(), show_id))
 
 def delete_show(show_id):
-    conn = get_db()
-    conn.execute("DELETE FROM shows WHERE id = ?", (show_id,))
-    conn.execute("DELETE FROM watch_history WHERE show_id = ?", (show_id,))
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("DELETE FROM watch_history WHERE show_id = %s", (show_id,))
+            cur.execute("DELETE FROM shows WHERE id = %s", (show_id,))
+        else:
+            cur.execute("DELETE FROM watch_history WHERE show_id = ?", (show_id,))
+            cur.execute("DELETE FROM shows WHERE id = ?", (show_id,))
 
 def dismiss_recommendation(trakt_slug):
-    conn = get_db()
-    try:
-        conn.execute("INSERT INTO dismissed_recommendations (trakt_slug) VALUES (?)", (trakt_slug,))
-        conn.commit()
-    except:
-        pass  # Already dismissed
-    conn.close()
+    with get_db() as conn:
+        cur = conn.cursor()
+        try:
+            if DATABASE_URL:
+                cur.execute("INSERT INTO dismissed_recommendations (trakt_slug) VALUES (%s) ON CONFLICT DO NOTHING", (trakt_slug,))
+            else:
+                cur.execute("INSERT OR IGNORE INTO dismissed_recommendations (trakt_slug) VALUES (?)", (trakt_slug,))
+        except:
+            pass
 
 def get_dismissed_recommendations():
-    conn = get_db()
-    dismissed = conn.execute("SELECT * FROM dismissed_recommendations").fetchall()
-    conn.close()
-    return [dict(d) for d in dismissed]
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM dismissed_recommendations")
+        return [_dict(row) for row in cur.fetchall()]
 
 def seed_kens_shows():
-    """Seed database with Ken's current watchlist"""
-    conn = get_db()
-    existing = conn.execute("SELECT COUNT(*) FROM shows").fetchone()[0]
-    conn.close()
-    
-    if existing > 0:
-        return  # Already seeded
+    """Seed database with Ken's current watchlist - only if empty"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as count FROM shows")
+        result = cur.fetchone()
+        count = result['count'] if DATABASE_URL else result[0]
+        
+        if count > 0:
+            return  # Already has data
     
     shows = [
-        # (title, service, season, episode, air_day, priority, notes, status)
         ("The Pitt", "Max", 1, 99, "Thursday", 1, "Caught up - new eps weekly", "current"),
         ("Shrinking", "Apple TV+", 3, 99, "Tuesday", 1, "Caught up", "current"),
         ("Hijack", "Apple TV+", 2, 99, "Tuesday", 1, "S2 through March 4", "current"),
