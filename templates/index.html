@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#f8fafc">
+    <meta name="theme-color" content="#0f0f0f">
     <title>What's On?</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { 
             -webkit-tap-highlight-color: transparent;
-            background: #f8fafc;
+            background: #0f0f0f;
             min-height: 100vh;
         }
         
@@ -50,13 +50,13 @@
             width: 140px;
             height: 210px;
             object-fit: cover;
-            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         }
         
         .show-poster-placeholder {
             width: 140px;
             height: 210px;
-            background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -134,7 +134,7 @@
         .section-title {
             font-size: 1.1rem;
             font-weight: 700;
-            color: #1e293b;
+            color: white;
             margin-bottom: 8px;
             padding-left: 4px;
             display: flex;
@@ -146,7 +146,7 @@
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(0, 0, 0, 0.9);
             z-index: 50;
             align-items: center;
             justify-content: center;
@@ -156,13 +156,12 @@
             display: flex;
         }
         .modal-content {
-            background: #ffffff;
+            background: #1a1a1a;
             border-radius: 1rem;
             padding: 1.5rem;
             width: 100%;
             max-width: 340px;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid #333;
         }
         
         input[type="number"] {
@@ -192,14 +191,14 @@
         }
     </style>
 </head>
-<body class="text-gray-800 px-4 pt-4 pb-24">
+<body class="text-gray-100 px-4 pt-4 pb-24">
     <header class="mb-6 flex justify-between items-center">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900">What's On?</h1>
+            <h1 class="text-2xl font-bold text-white">What's On?</h1>
             <p class="text-gray-500 text-sm">{{ priority_shows|length + backup_shows|length }} active shows</p>
         </div>
         <div class="flex gap-3 items-center">
-            <button onclick="fetchAllPosters()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded-lg text-sm" title="Fetch missing posters">Get Posters</button>
+            <button onclick="fetchAllPosters()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-lg text-sm" title="Fetch missing posters">Get Posters</button>
             <button onclick="openAddModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-sm font-medium">+ Add</button>
         </div>
     </header>
@@ -330,19 +329,19 @@
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
         <div class="modal-content">
-            <h3 id="editTitle" class="text-lg font-bold text-gray-900 mb-1">Edit Show</h3>
-            <p id="editService" class="text-gray-500 text-sm mb-4"></p>
+            <h3 id="editTitle" class="text-lg font-bold text-white mb-1">Edit Show</h3>
+            <p id="editService" class="text-gray-400 text-sm mb-4"></p>
             <form id="editForm" method="POST">
                 <div class="flex gap-4 mb-4">
                     <div class="flex-1">
-                        <label class="block text-gray-500 text-xs mb-1">Season</label>
+                        <label class="block text-gray-400 text-xs mb-1">Season</label>
                         <input type="number" name="season" id="editSeason" min="1" 
-                            class="w-full bg-gray-100 text-gray-900 text-2xl font-bold text-center p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                            class="w-full bg-gray-800 text-white text-2xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                     <div class="flex-1">
-                        <label class="block text-gray-500 text-xs mb-1">Episode</label>
+                        <label class="block text-gray-400 text-xs mb-1">Episode</label>
                         <input type="number" name="episode" id="editEpisode" min="1"
-                            class="w-full bg-gray-100 text-gray-900 text-2xl font-bold text-center p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                            class="w-full bg-gray-800 text-white text-2xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                 </div>
                 
@@ -353,7 +352,7 @@
                 
                 <div class="grid grid-cols-2 gap-2 mb-3">
                     <button type="button" onclick="quickAction('next')" 
-                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg text-sm">
+                        class="bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg text-sm">
                         +1 Episode
                     </button>
                     <button type="button" onclick="quickAction('caught-up')" 
@@ -362,17 +361,17 @@
                     </button>
                 </div>
                 
-                <div class="flex gap-2 pt-2 border-t border-gray-200">
+                <div class="flex gap-2 pt-2 border-t border-gray-700">
                     <button type="button" onclick="quickAction('hiatus')" 
-                        class="flex-1 text-gray-500 text-xs py-2 hover:text-gray-700">
+                        class="flex-1 text-gray-400 text-xs py-2 hover:text-white">
                         Season Over 💤
                     </button>
                     <button type="button" onclick="quickAction('active')" id="activeBtn"
-                        class="flex-1 text-emerald-600 text-xs py-2 hover:text-emerald-500 hidden">
+                        class="flex-1 text-emerald-400 text-xs py-2 hover:text-emerald-300 hidden">
                         New Season! 🎉
                     </button>
                     <button type="button" onclick="closeEdit()" 
-                        class="flex-1 text-gray-500 text-xs py-2 hover:text-gray-700">
+                        class="flex-1 text-gray-400 text-xs py-2 hover:text-white">
                         Cancel
                     </button>
                 </div>
@@ -383,18 +382,18 @@
     <!-- Add Show Modal -->
     <div id="addModal" class="modal">
         <div class="modal-content">
-            <h3 class="text-lg font-bold text-gray-900 mb-4">Add Show</h3>
+            <h3 class="text-lg font-bold text-white mb-4">Add Show</h3>
             <form action="/api/shows" method="POST">
                 <div class="mb-3">
-                    <label class="block text-gray-500 text-xs mb-1">Show Title</label>
+                    <label class="block text-gray-400 text-xs mb-1">Show Title</label>
                     <input type="text" name="title" required placeholder="e.g., The Bear"
-                        class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                        class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                 </div>
                 
                 <div class="mb-3">
-                    <label class="block text-gray-500 text-xs mb-1">Streaming Service</label>
+                    <label class="block text-gray-400 text-xs mb-1">Streaming Service</label>
                     <select name="service" required
-                        class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                        class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                         <option value="Max">Max</option>
                         <option value="Apple TV+">Apple TV+</option>
                         <option value="Hulu">Hulu</option>
@@ -409,21 +408,21 @@
                 
                 <div class="flex gap-3 mb-3">
                     <div class="flex-1">
-                        <label class="block text-gray-500 text-xs mb-1">Season</label>
+                        <label class="block text-gray-400 text-xs mb-1">Season</label>
                         <input type="number" name="current_season" value="1" min="1"
-                            class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                            class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                     <div class="flex-1">
-                        <label class="block text-gray-500 text-xs mb-1">Episode</label>
+                        <label class="block text-gray-400 text-xs mb-1">Episode</label>
                         <input type="number" name="current_episode" value="1" min="1"
-                            class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                            class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                 </div>
                 
                 <div class="mb-3">
-                    <label class="block text-gray-500 text-xs mb-1">Priority</label>
+                    <label class="block text-gray-400 text-xs mb-1">Priority</label>
                     <select name="priority"
-                        class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                        class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                         <option value="1">🟢 Priority - Watch First</option>
                         <option value="2" selected>🔵 Regular</option>
                         <option value="3">⚪ Backup - When Nothing Else On</option>
@@ -431,9 +430,9 @@
                 </div>
                 
                 <div class="mb-4">
-                    <label class="block text-gray-500 text-xs mb-1">Air Day (optional)</label>
+                    <label class="block text-gray-400 text-xs mb-1">Air Day (optional)</label>
                     <select name="air_day"
-                        class="w-full bg-gray-100 text-gray-900 p-3 rounded-lg border border-gray-300 focus:border-emerald-500 focus:outline-none">
+                        class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                         <option value="">Not set</option>
                         <option value="Monday">Monday</option>
                         <option value="Tuesday">Tuesday</option>
@@ -447,7 +446,7 @@
                 
                 <div class="flex gap-2">
                     <button type="button" onclick="closeAddModal()" 
-                        class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-medium">
+                        class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-medium">
                         Cancel
                     </button>
                     <button type="submit" 
