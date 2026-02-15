@@ -16,6 +16,17 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 
+# Trakt API for show data
+TRAKT_CLIENT_ID = os.environ.get("TRAKT_CLIENT_ID", "947255b4c65a76d7d7f29ce500d333f22de5641dbc0bf1bd701c325acfa74434")
+TRAKT_BASE_URL = "https://api.trakt.tv"
+
+def trakt_headers():
+    return {
+        "trakt-api-key": TRAKT_CLIENT_ID,
+        "trakt-api-version": "2",
+        "Content-Type": "application/json"
+    }
+
 async def search_tmdb(title: str):
     """Search TMDB for a show and return poster URL and TMDB ID"""
     if not TMDB_API_KEY:
@@ -203,3 +214,216 @@ async def fetch_all_posters():
                 updated += 1
     
     return {"updated": updated}
+
+# ============ TRAKT INTEGRATION ============
+
+async def search_trakt(title: str):
+    """Search Trakt for a show and return basic info"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{TRAKT_BASE_URL}/search/show",
+                params={"query": title},
+                headers=trakt_headers()
+            )
+            data = resp.json()
+            if data:
+                show = data[0]["show"]
+                return {
+                    "trakt_id": show.get("ids", {}).get("trakt"),
+                    "trakt_slug": show.get("ids", {}).get("slug"),
+                    "imdb_id": show.get("ids", {}).get("imdb"),
+                    "title": show.get("title"),
+                    "year": show.get("year"),
+                    "status": show.get("status")  # returning series, ended, etc.
+                }
+    except Exception as e:
+        print(f"Trakt search error: {e}")
+    return None
+
+async def get_trakt_show_details(slug: str):
+    """Get detailed show info including air day and next episode"""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get show details
+            show_resp = await client.get(
+                f"{TRAKT_BASE_URL}/shows/{slug}",
+                params={"extended": "full"},
+                headers=trakt_headers()
+            )
+            show_data = show_resp.json()
+            
+            # Get next episode
+            next_ep_resp = await client.get(
+                f"{TRAKT_BASE_URL}/shows/{slug}/next_episode",
+                params={"extended": "full"},
+                headers=trakt_headers()
+            )
+            next_ep = next_ep_resp.json() if next_ep_resp.status_code == 200 else None
+            
+            # Parse air day from airs info
+            airs = show_data.get("airs", {})
+            air_day = airs.get("day")  # e.g., "Thursday"
+            air_time = airs.get("time")  # e.g., "21:00"
+            
+            return {
+                "title": show_data.get("title"),
+                "year": show_data.get("year"),
+                "status": show_data.get("status"),
+                "network": show_data.get("network"),
+                "air_day": air_day,
+                "air_time": air_time,
+                "runtime": show_data.get("runtime"),
+                "genres": show_data.get("genres", []),
+                "overview": show_data.get("overview"),
+                "rating": show_data.get("rating"),
+                "trakt_slug": slug,
+                "next_episode": {
+                    "season": next_ep.get("season"),
+                    "episode": next_ep.get("number"),
+                    "title": next_ep.get("title"),
+                    "air_date": next_ep.get("first_aired")
+                } if next_ep else None
+            }
+    except Exception as e:
+        print(f"Trakt show details error: {e}")
+    return None
+
+@app.get("/api/trakt/search")
+async def api_trakt_search(q: str):
+    """Search for a show on Trakt"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{TRAKT_BASE_URL}/search/show",
+                params={"query": q, "limit": 10},
+                headers=trakt_headers()
+            )
+            data = resp.json()
+            results = []
+            for item in data:
+                show = item.get("show", {})
+                results.append({
+                    "title": show.get("title"),
+                    "year": show.get("year"),
+                    "trakt_slug": show.get("ids", {}).get("slug"),
+                    "trakt_id": show.get("ids", {}).get("trakt"),
+                    "overview": show.get("overview", "")[:200]
+                })
+            return {"results": results}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/trakt/show/{slug}")
+async def api_trakt_show(slug: str):
+    """Get detailed info about a show from Trakt"""
+    details = await get_trakt_show_details(slug)
+    if details:
+        return details
+    raise HTTPException(status_code=404, detail="Show not found on Trakt")
+
+@app.post("/api/shows/{show_id}/fetch-trakt")
+async def fetch_trakt_for_show(show_id: int):
+    """Fetch Trakt data for an existing show and update air day"""
+    show = db.get_show(show_id)
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    
+    # Search Trakt
+    trakt_info = await search_trakt(show['title'])
+    if not trakt_info or not trakt_info.get('trakt_slug'):
+        return {"error": "Show not found on Trakt"}
+    
+    # Get full details
+    details = await get_trakt_show_details(trakt_info['trakt_slug'])
+    if details:
+        # Update show with Trakt data
+        update_data = {"trakt_slug": trakt_info['trakt_slug']}
+        if details.get('air_day'):
+            update_data['air_day'] = details['air_day']
+        
+        db.update_show(show_id, **update_data)
+        return {
+            "updated": True,
+            "air_day": details.get('air_day'),
+            "next_episode": details.get('next_episode'),
+            "status": details.get('status')
+        }
+    
+    return {"error": "Could not fetch show details"}
+
+@app.post("/api/fetch-all-trakt")
+async def fetch_all_trakt():
+    """Fetch Trakt data (air days) for all shows"""
+    shows = db.get_all_shows()
+    updated = 0
+    
+    for show in shows:
+        if not show.get('air_day'):  # Only fetch if no air day set
+            trakt_info = await search_trakt(show['title'])
+            if trakt_info and trakt_info.get('trakt_slug'):
+                details = await get_trakt_show_details(trakt_info['trakt_slug'])
+                if details and details.get('air_day'):
+                    db.update_show(show['id'], 
+                        trakt_slug=trakt_info['trakt_slug'],
+                        air_day=details['air_day']
+                    )
+                    updated += 1
+    
+    return {"updated": updated}
+
+@app.get("/api/recommendations")
+async def get_recommendations():
+    """Get show recommendations based on current shows"""
+    shows = db.get_all_shows()
+    if not shows:
+        return {"recommendations": [], "message": "Add some shows first!"}
+    
+    # Get genres from current shows via Trakt
+    all_genres = []
+    for show in shows[:5]:  # Check first 5 shows
+        trakt_info = await search_trakt(show['title'])
+        if trakt_info and trakt_info.get('trakt_slug'):
+            details = await get_trakt_show_details(trakt_info['trakt_slug'])
+            if details:
+                all_genres.extend(details.get('genres', []))
+    
+    # Get most common genres
+    from collections import Counter
+    top_genres = [g for g, _ in Counter(all_genres).most_common(3)]
+    
+    if not top_genres:
+        top_genres = ['drama', 'thriller']  # Fallback
+    
+    # Search for recommended shows
+    recommendations = []
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get popular shows in those genres
+            resp = await client.get(
+                f"{TRAKT_BASE_URL}/shows/popular",
+                params={"genres": ",".join(top_genres), "limit": 10},
+                headers=trakt_headers()
+            )
+            popular = resp.json()
+            
+            # Filter out shows Ken already has
+            current_titles = {s['title'].lower() for s in shows}
+            
+            for show in popular:
+                if show.get('title', '').lower() not in current_titles:
+                    recommendations.append({
+                        "title": show.get("title"),
+                        "year": show.get("year"),
+                        "trakt_slug": show.get("ids", {}).get("slug"),
+                        "overview": show.get("overview", "")[:200] if show.get("overview") else ""
+                    })
+                    if len(recommendations) >= 5:
+                        break
+    except Exception as e:
+        print(f"Recommendations error: {e}")
+    
+    return {
+        "based_on_genres": top_genres,
+        "recommendations": recommendations
+    }

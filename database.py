@@ -27,6 +27,7 @@ def init_db():
             notes TEXT,
             tmdb_id INTEGER,
             poster_url TEXT,
+            trakt_slug TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -40,7 +41,12 @@ def init_db():
             FOREIGN KEY (show_id) REFERENCES shows(id)
         );
     """)
-    conn.commit()
+    # Add trakt_slug column if it doesn't exist (migration)
+    try:
+        conn.execute("ALTER TABLE shows ADD COLUMN trakt_slug TEXT")
+        conn.commit()
+    except:
+        pass  # Column already exists
     conn.close()
 
 def get_all_shows():

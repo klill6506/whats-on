@@ -197,9 +197,16 @@
             <h1 class="text-2xl font-bold text-white">What's On?</h1>
             <p class="text-gray-500 text-sm">{{ priority_shows|length + backup_shows|length }} active shows</p>
         </div>
-        <div class="flex gap-3 items-center">
-            <button onclick="fetchAllPosters()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-lg text-sm" title="Fetch missing posters">Get Posters</button>
+        <div class="flex gap-2 items-center">
+            <button onclick="toggleMenu()" class="bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded-lg text-sm">⋮</button>
             <button onclick="openAddModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-sm font-medium">+ Add</button>
+        </div>
+        
+        <!-- Dropdown Menu -->
+        <div id="menuDropdown" class="hidden absolute right-4 top-16 bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-2 z-50">
+            <button onclick="fetchAllPosters(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">🖼️ Get Posters</button>
+            <button onclick="fetchAllTrakt(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">📅 Get Air Days</button>
+            <button onclick="showRecommendations(); toggleMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">💡 Recommendations</button>
         </div>
     </header>
 
@@ -525,23 +532,64 @@
         });
 
         async function fetchAllPosters() {
-            const btn = event.target;
-            const originalText = btn.textContent;
-            btn.textContent = 'Loading...';
-            btn.disabled = true;
-            
             try {
                 const response = await fetch('/api/fetch-all-posters', { method: 'POST' });
                 const data = await response.json();
                 if (data.updated > 0) {
                     location.reload();
                 } else {
-                    btn.textContent = 'Done ✓';
-                    setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1500);
+                    alert('All posters already fetched!');
                 }
             } catch (err) {
-                btn.textContent = 'Error';
-                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1500);
+                alert('Error fetching posters');
+            }
+        }
+
+        function toggleMenu() {
+            const menu = document.getElementById('menuDropdown');
+            menu.classList.toggle('hidden');
+        }
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('menuDropdown');
+            const menuBtn = e.target.closest('button');
+            if (!menu.contains(e.target) && (!menuBtn || menuBtn.textContent !== '⋮')) {
+                menu.classList.add('hidden');
+            }
+        });
+
+        async function fetchAllTrakt() {
+            try {
+                const response = await fetch('/api/fetch-all-trakt', { method: 'POST' });
+                const data = await response.json();
+                if (data.updated > 0) {
+                    alert(`Updated air days for ${data.updated} shows!`);
+                    location.reload();
+                } else {
+                    alert('All shows already have air days set!');
+                }
+            } catch (err) {
+                alert('Error fetching from Trakt');
+            }
+        }
+
+        async function showRecommendations() {
+            try {
+                const response = await fetch('/api/recommendations');
+                const data = await response.json();
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    let msg = `Based on your taste (${data.based_on_genres.join(', ')}):\n\n`;
+                    data.recommendations.forEach((show, i) => {
+                        msg += `${i + 1}. ${show.title} (${show.year || 'N/A'})\n`;
+                    });
+                    alert(msg);
+                } else {
+                    alert('No recommendations found. Add more shows first!');
+                }
+            } catch (err) {
+                alert('Error getting recommendations');
             }
         }
     </script>
