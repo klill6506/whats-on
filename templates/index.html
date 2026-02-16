@@ -402,6 +402,10 @@
                 </div>
                 
                 <div class="pt-3 mt-3 border-t border-gray-700">
+                    <button type="button" onclick="playOnRoku()" 
+                        class="w-full bg-purple-700 hover:bg-purple-600 text-white py-2 rounded-lg text-sm mb-2">
+                        📺 Play on Roku
+                    </button>
                     <button type="button" onclick="deleteShow()" 
                         class="w-full text-red-400 text-xs py-2 hover:text-red-300 hover:bg-red-900/20 rounded">
                         🗑️ Delete Show
@@ -691,6 +695,78 @@
                 }
             } catch (err) {
                 card.style.opacity = '1';
+            }
+        }
+
+        // ============ ROKU INTEGRATION ============
+        const ROKU_IP = localStorage.getItem('rokuIp') || '192.168.86.220';
+        
+        // Service to Roku channel ID mapping
+        const ROKU_CHANNELS = {
+            'max': 61322,
+            'hbo max': 61322,
+            'apple tv+': 551012,
+            'appletv+': 551012,
+            'hulu': 2285,
+            'netflix': 12,
+            'peacock': 593099,
+            'paramount+': 37102,
+            'prime video': 13,
+            'amazon prime': 13,
+            'disney+': 291097
+        };
+        
+        let currentService = null;
+        
+        function playOnRoku() {
+            if (!currentService) {
+                alert('No service detected for this show');
+                return;
+            }
+            
+            const service = currentService.toLowerCase();
+            const channelId = ROKU_CHANNELS[service];
+            
+            if (!channelId) {
+                alert(`Unknown service: ${currentService}. Can't launch on Roku.`);
+                return;
+            }
+            
+            // Launch the channel on Roku
+            const url = `http://${ROKU_IP}:8060/launch/${channelId}`;
+            
+            // Use a hidden image to send the POST (avoids CORS issues)
+            // Actually, Roku ECP requires POST, so we need to try fetch
+            fetch(url, { 
+                method: 'POST',
+                mode: 'no-cors'  // Roku doesn't send CORS headers
+            }).then(() => {
+                // Close the modal
+                closeEdit();
+                // Show brief confirmation
+                const toast = document.createElement('div');
+                toast.className = 'fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm z-50';
+                toast.textContent = `📺 Launching ${currentService}...`;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
+            }).catch(err => {
+                alert('Could not reach Roku. Make sure you\'re on the same WiFi.');
+            });
+        }
+        
+        // Update openEdit to store current service
+        const originalOpenEdit = openEdit;
+        openEdit = function(id, title, season, episode, service, status) {
+            currentService = service;
+            originalOpenEdit(id, title, season, episode, service, status);
+        };
+        
+        // Settings: Allow changing Roku IP
+        function setRokuIp() {
+            const ip = prompt('Enter your Roku IP address:', ROKU_IP);
+            if (ip) {
+                localStorage.setItem('rokuIp', ip);
+                alert('Roku IP saved: ' + ip);
             }
         }
     </script>
