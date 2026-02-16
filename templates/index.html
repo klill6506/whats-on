@@ -626,10 +626,16 @@
                                 <div class="show-title">${show.title}</div>
                                 <div class="show-meta">${show.year || ''}</div>
                             </div>
-                            <div class="rec-actions" style="position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); display:none; flex-direction:column; justify-content:center; align-items:center; gap:8px; padding:10px;">
-                                <button onclick="addRec('${show.title}', '${show.trakt_slug}')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg w-full">+ Add to List</button>
-                                <button onclick="dismissRec('${show.trakt_slug}', this)" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg w-full">Already Seen</button>
-                                <button onclick="dismissRec('${show.trakt_slug}', this)" class="text-gray-400 hover:text-white text-xs py-1">Not Interested</button>
+                            <div class="rec-actions" style="position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.92); display:none; flex-direction:column; justify-content:space-between; padding:10px; overflow-y:auto;">
+                                <div>
+                                    <div class="text-white font-semibold text-sm mb-1">${show.title}</div>
+                                    <div class="text-gray-400 text-xs leading-relaxed">${show.overview || 'No description available'}</div>
+                                </div>
+                                <div class="flex flex-col gap-2 mt-2">
+                                    <button onclick="addRec('${show.title}', '${show.trakt_slug}')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg w-full">+ Add to List</button>
+                                    <button onclick="dismissRec('${show.trakt_slug}', this)" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg w-full">Already Seen</button>
+                                    <button onclick="dismissRec('${show.trakt_slug}', this)" class="text-gray-500 hover:text-white text-xs py-1">Not Interested</button>
+                                </div>
                             </div>
                         </div>
                     `).join('');
