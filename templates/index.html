@@ -732,26 +732,41 @@
                 return;
             }
             
-            // Launch the channel on Roku
+            // Roku ECP requires POST - use form + hidden iframe to bypass CORS
             const url = `http://${ROKU_IP}:8060/launch/${channelId}`;
             
-            // Use a hidden image to send the POST (avoids CORS issues)
-            // Actually, Roku ECP requires POST, so we need to try fetch
-            fetch(url, { 
-                method: 'POST',
-                mode: 'no-cors'  // Roku doesn't send CORS headers
-            }).then(() => {
-                // Close the modal
-                closeEdit();
-                // Show brief confirmation
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm z-50';
-                toast.textContent = `📺 Launching ${currentService}...`;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2000);
-            }).catch(err => {
-                alert('Could not reach Roku. Make sure you\'re on the same WiFi.');
-            });
+            // Create hidden iframe as form target
+            let iframe = document.getElementById('rokuFrame');
+            if (!iframe) {
+                iframe = document.createElement('iframe');
+                iframe.id = 'rokuFrame';
+                iframe.name = 'rokuFrame';
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+            }
+            
+            // Create and submit form
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = url;
+            form.target = 'rokuFrame';
+            document.body.appendChild(form);
+            
+            try {
+                form.submit();
+            } catch(e) {
+                // Expected - cross-origin frame issues, but request still sends
+            }
+            
+            form.remove();
+            
+            // Close modal and show confirmation
+            closeEdit();
+            const toast = document.createElement('div');
+            toast.className = 'fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm z-50';
+            toast.textContent = `📺 Launching ${currentService}...`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
         }
         
         // Update openEdit to store current service
