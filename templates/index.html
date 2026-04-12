@@ -9,13 +9,11 @@
     <title>What's On?</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { 
+        body {
             -webkit-tap-highlight-color: transparent;
             background: #0f0f0f;
             min-height: 100vh;
         }
-        
-        /* Horizontal scroll row */
         .show-row {
             display: flex;
             gap: 12px;
@@ -25,11 +23,7 @@
             padding: 8px 0;
             scrollbar-width: none;
         }
-        .show-row::-webkit-scrollbar {
-            display: none;
-        }
-        
-        /* Show card - Trakt/Netflix style */
+        .show-row::-webkit-scrollbar { display: none; }
         .show-card {
             flex: 0 0 140px;
             scroll-snap-align: start;
@@ -39,20 +33,14 @@
             transition: transform 0.2s ease;
             cursor: pointer;
         }
-        .show-card:hover {
-            transform: scale(1.05);
-        }
-        .show-card:active {
-            transform: scale(0.98);
-        }
-        
+        .show-card:hover { transform: scale(1.05); }
+        .show-card:active { transform: scale(0.98); }
         .show-poster {
             width: 140px;
             height: 210px;
             object-fit: cover;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         }
-        
         .show-poster-placeholder {
             width: 140px;
             height: 210px;
@@ -62,7 +50,6 @@
             justify-content: center;
             font-size: 2.5rem;
         }
-        
         .show-info {
             position: absolute;
             bottom: 0;
@@ -71,7 +58,6 @@
             padding: 8px;
             background: linear-gradient(transparent, rgba(0,0,0,0.95));
         }
-        
         .show-title {
             font-size: 0.75rem;
             font-weight: 600;
@@ -82,13 +68,7 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
-        
-        .show-meta {
-            font-size: 0.65rem;
-            color: #9ca3af;
-            margin-top: 2px;
-        }
-        
+        .show-meta { font-size: 0.65rem; color: #9ca3af; margin-top: 2px; }
         .show-progress {
             position: absolute;
             top: 8px;
@@ -100,7 +80,6 @@
             padding: 2px 6px;
             border-radius: 4px;
         }
-        
         .show-new-badge {
             position: absolute;
             top: 8px;
@@ -113,15 +92,12 @@
             border-radius: 3px;
             text-transform: uppercase;
         }
-        
         .service-dot {
-            width: 8px;
-            height: 8px;
+            width: 8px; height: 8px;
             border-radius: 50%;
             display: inline-block;
             margin-right: 4px;
         }
-        
         .service-max { background: #0052ff; }
         .service-appletv { background: linear-gradient(135deg, #fa233b, #fb5c74); }
         .service-hulu { background: #1ce783; }
@@ -142,7 +118,6 @@
             align-items: center;
             gap: 8px;
         }
-        
         .modal {
             display: none;
             position: fixed;
@@ -153,9 +128,7 @@
             justify-content: center;
             padding: 1rem;
         }
-        .modal.active {
-            display: flex;
-        }
+        .modal.active { display: flex; }
         .modal-content {
             background: #1a1a1a;
             border-radius: 1rem;
@@ -164,32 +137,34 @@
             max-width: 340px;
             border: 1px solid #333;
         }
-        
-        input[type="number"] {
-            -moz-appearance: textfield;
-        }
+        input[type="number"] { -moz-appearance: textfield; }
         input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
+        input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+        /* Star rating */
+        .star-rating { display: flex; gap: 4px; margin-bottom: 12px; }
+        .star-rating .star {
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: transform 0.1s;
+            -webkit-user-select: none;
+            user-select: none;
         }
-        
-        .add-btn {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            width: 56px;
-            height: 56px;
-            background: #10b981;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-            z-index: 40;
+        .star-rating .star:hover { transform: scale(1.2); }
+        .star-rating .star.filled { color: #facc15; }
+        .star-rating .star.empty { color: #374151; }
+
+        /* Rec card overlay */
+        .rec-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.92);
+            display: none;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 10px;
+            overflow-y: auto;
         }
+        .rec-overlay.active { display: flex; }
     </style>
 </head>
 <body class="text-gray-100 px-4 pt-4 pb-24">
@@ -204,12 +179,9 @@
             </div>
             <button onclick="openAddModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-sm font-medium">+ Add</button>
         </div>
-        
-        <!-- Action buttons row -->
         <div class="flex gap-2 overflow-x-auto pb-2">
             <button onclick="fetchAllPosters()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🖼️ Posters</button>
             <button onclick="fetchAllTrakt()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">📅 Air Days</button>
-            <button onclick="loadRecommendations()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">💡 Recommend</button>
             <button onclick="dedupShows()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🧹 Dedup</button>
         </div>
     </header>
@@ -221,21 +193,18 @@
         </h2>
         <div class="show-row">
             {% for show in priority_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-                
                 {% if show.air_day %}
                 <div class="show-new-badge">{{ show.air_day[:3] }}</div>
                 {% endif %}
-                
                 <div class="show-progress">
                     {% if show.current_episode == 99 %}✓{% else %}S{{ show.current_season }}E{{ show.current_episode }}{% endif %}
                 </div>
-                
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -256,21 +225,18 @@
         </h2>
         <div class="show-row">
             {% for show in backup_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})" style="opacity: 0.85">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})" style="opacity: 0.85">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-                
                 {% if show.air_day %}
                 <div class="show-new-badge">{{ show.air_day[:3] }}</div>
                 {% endif %}
-                
                 <div class="show-progress">
                     {% if show.current_episode == 99 %}✓{% else %}S{{ show.current_season }}E{{ show.current_episode }}{% endif %}
                 </div>
-                
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -291,22 +257,19 @@
         </h2>
         <div class="show-row">
             {% for show in catching_up %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-
                 <div class="show-progress" style="background: rgba(59, 130, 246, 0.9);">
                     S{{ show.current_season }}E{{ show.current_episode }}
                 </div>
-
                 <button onclick="event.stopPropagation(); quickAction2('caught-up', {{ show.id }}, {{ show.title|tojson }})"
                     class="quick-action-btn" style="position:absolute;top:8px;left:8px;background:rgba(59,130,246,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
                     ✓ Caught Up
                 </button>
-
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -320,16 +283,54 @@
     </section>
     {% endif %}
 
-    <!-- Recommendations Row -->
-    <section id="recsSection" class="mb-8 hidden">
+    <!-- Recommendations (server-rendered) -->
+    {% if recommendations %}
+    <section class="mb-8">
         <h2 class="section-title">
             <span class="text-purple-400">💡</span> Recommended For You
-            <button onclick="loadRecommendations()" class="ml-auto text-xs text-gray-500 hover:text-white">↻ Refresh</button>
+            <button onclick="refreshRecs()" class="ml-auto text-xs text-gray-500 hover:text-white">↻ Refresh</button>
         </h2>
-        <div id="recsRow" class="show-row">
-            <!-- Populated by JavaScript -->
+        <div class="show-row">
+            {% for rec in recommendations %}
+            <div class="show-card rec-card" style="border: 2px solid #a855f7;" onclick="toggleRecOverlay(this, event)">
+                {% if rec.poster_url %}
+                <img src="{{ rec.poster_url }}" alt="{{ rec.title }}" class="show-poster">
+                {% else %}
+                <div class="show-poster-placeholder">💡</div>
+                {% endif %}
+                <div class="show-info">
+                    <div class="show-title">{{ rec.title }}</div>
+                    <div class="show-meta">
+                        {{ rec.year or '' }}
+                        {% if rec._services %} · {{ rec._services[0] }}{% endif %}
+                    </div>
+                </div>
+                <div class="rec-overlay">
+                    <div>
+                        <div class="text-white font-semibold text-sm mb-1">{{ rec.title }}</div>
+                        {% if rec.genres %}
+                        <div class="text-purple-400 text-xs mb-1">{{ rec.genres }}</div>
+                        {% endif %}
+                        <div class="text-gray-400 text-xs leading-relaxed">{{ rec.overview or 'No description available' }}</div>
+                    </div>
+                    <div class="flex flex-col gap-2 mt-2">
+                        <form action="/api/recommendations/add" method="POST">
+                            <input type="hidden" name="title" value="{{ rec.title }}">
+                            <input type="hidden" name="trakt_slug" value="{{ rec.trakt_slug }}">
+                            <input type="hidden" name="service" value="{{ rec._services[0] if rec._services else 'Other' }}">
+                            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg w-full">+ Add to List</button>
+                        </form>
+                        <form action="/api/recommendations/dismiss" method="POST">
+                            <input type="hidden" name="trakt_slug" value="{{ rec.trakt_slug }}">
+                            <button type="submit" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg w-full">Not Interested</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
     </section>
+    {% endif %}
 
     {% if between_seasons %}
     <section class="mb-8">
@@ -338,18 +339,16 @@
         </h2>
         <div class="show-row">
             {% for show in between_seasons %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})" style="opacity: 0.5; filter: grayscale(50%);">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})" style="opacity: 0.5; filter: grayscale(50%);">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-
                 <button onclick="event.stopPropagation(); quickAction2('active', {{ show.id }}, {{ show.title|tojson }})"
                     class="quick-action-btn" style="position:absolute;top:8px;right:8px;background:rgba(16,185,129,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
                     🎉 New Season
                 </button>
-
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -366,12 +365,22 @@
     <div id="editModal" class="modal">
         <div class="modal-content">
             <h3 id="editTitle" class="text-lg font-bold text-white mb-1">Edit Show</h3>
-            <p id="editService" class="text-gray-400 text-sm mb-4"></p>
+            <p id="editService" class="text-gray-400 text-sm mb-2"></p>
+
+            <!-- Star Rating -->
+            <div class="star-rating" id="starRating">
+                <span class="star empty" data-value="1" onclick="setRating(1)">★</span>
+                <span class="star empty" data-value="2" onclick="setRating(2)">★</span>
+                <span class="star empty" data-value="3" onclick="setRating(3)">★</span>
+                <span class="star empty" data-value="4" onclick="setRating(4)">★</span>
+                <span class="star empty" data-value="5" onclick="setRating(5)">★</span>
+            </div>
+
             <form id="editForm" method="POST">
                 <div class="flex gap-4 mb-4">
                     <div class="flex-1">
                         <label class="block text-gray-400 text-xs mb-1">Season</label>
-                        <input type="number" name="season" id="editSeason" min="1" 
+                        <input type="number" name="season" id="editSeason" min="1"
                             class="w-full bg-gray-800 text-white text-2xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                     <div class="flex-1">
@@ -380,25 +389,25 @@
                             class="w-full bg-gray-800 text-white text-2xl font-bold text-center p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                 </div>
-                
-                <button type="submit" 
+
+                <button type="submit"
                     class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-medium mb-3">
                     Save Progress
                 </button>
-                
+
                 <div class="grid grid-cols-2 gap-2 mb-3">
-                    <button type="button" onclick="quickAction('next')" 
+                    <button type="button" onclick="quickAction('next')"
                         class="bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg text-sm">
                         +1 Episode
                     </button>
-                    <button type="button" onclick="quickAction('caught-up')" 
+                    <button type="button" onclick="quickAction('caught-up')"
                         class="bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-sm">
                         Caught Up ✓
                     </button>
                 </div>
-                
+
                 <div class="flex gap-2 pt-2 border-t border-gray-700">
-                    <button type="button" onclick="quickAction('hiatus')" 
+                    <button type="button" onclick="quickAction('hiatus')"
                         class="flex-1 text-gray-400 text-xs py-2 hover:text-white">
                         Season Over 💤
                     </button>
@@ -406,18 +415,18 @@
                         class="flex-1 text-emerald-400 text-xs py-2 hover:text-emerald-300 hidden">
                         New Season! 🎉
                     </button>
-                    <button type="button" onclick="closeEdit()" 
+                    <button type="button" onclick="closeEdit()"
                         class="flex-1 text-gray-400 text-xs py-2 hover:text-white">
                         Cancel
                     </button>
                 </div>
-                
+
                 <div class="pt-3 mt-3 border-t border-gray-700">
-                    <button type="button" onclick="playOnRoku()" 
+                    <button type="button" onclick="playOnRoku()"
                         class="w-full bg-purple-700 hover:bg-purple-600 text-white py-2 rounded-lg text-sm mb-2">
                         📺 Play on Roku
                     </button>
-                    <button type="button" onclick="deleteShow()" 
+                    <button type="button" onclick="deleteShow()"
                         class="w-full text-red-400 text-xs py-2 hover:text-red-300 hover:bg-red-900/20 rounded">
                         🗑️ Delete Show
                     </button>
@@ -436,7 +445,6 @@
                     <input type="text" name="title" required placeholder="e.g., The Bear"
                         class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                 </div>
-                
                 <div class="mb-3">
                     <label class="block text-gray-400 text-xs mb-1">Streaming Service</label>
                     <select name="service" required
@@ -452,7 +460,6 @@
                         <option value="Other">Other</option>
                     </select>
                 </div>
-                
                 <div class="flex gap-3 mb-3">
                     <div class="flex-1">
                         <label class="block text-gray-400 text-xs mb-1">Season</label>
@@ -465,7 +472,6 @@
                             class="w-full bg-gray-800 text-white p-3 rounded-lg border border-gray-700 focus:border-emerald-500 focus:outline-none">
                     </div>
                 </div>
-                
                 <div class="mb-3">
                     <label class="block text-gray-400 text-xs mb-1">Priority</label>
                     <select name="priority"
@@ -475,7 +481,6 @@
                         <option value="3">⚪ Backup - When Nothing Else On</option>
                     </select>
                 </div>
-                
                 <div class="mb-4">
                     <label class="block text-gray-400 text-xs mb-1">Air Day (optional)</label>
                     <select name="air_day"
@@ -490,13 +495,12 @@
                         <option value="Sunday">Sunday</option>
                     </select>
                 </div>
-                
                 <div class="flex gap-2">
-                    <button type="button" onclick="closeAddModal()" 
+                    <button type="button" onclick="closeAddModal()"
                         class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-medium">
                         Cancel
                     </button>
-                    <button type="submit" 
+                    <button type="submit"
                         class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-medium">
                         Add Show
                     </button>
@@ -508,19 +512,21 @@
     <script>
         let currentShowId = null;
         let currentStatus = null;
+        let currentService = null;
+        let currentRating = 0;
 
-        function openEdit(id, title, season, episode, service, status) {
+        function openEdit(id, title, season, episode, service, status, rating) {
             currentShowId = id;
             currentStatus = status;
+            currentService = service;
+            currentRating = rating || 0;
             document.getElementById('editTitle').textContent = title;
             document.getElementById('editService').textContent = service;
             document.getElementById('editSeason').value = season;
             document.getElementById('editEpisode').value = episode === 99 ? 1 : episode;
             document.getElementById('editForm').action = '/edit-show/' + id;
-            
-            // Show "New Season" button if on hiatus
             document.getElementById('activeBtn').classList.toggle('hidden', status !== 'hiatus');
-            
+            renderStars(currentRating);
             document.getElementById('editModal').classList.add('active');
         }
 
@@ -529,11 +535,34 @@
             currentShowId = null;
         }
 
+        // Star rating
+        function renderStars(rating) {
+            var stars = document.querySelectorAll('#starRating .star');
+            for (var i = 0; i < stars.length; i++) {
+                if (i < rating) {
+                    stars[i].className = 'star filled';
+                } else {
+                    stars[i].className = 'star empty';
+                }
+            }
+        }
+
+        function setRating(value) {
+            if (!currentShowId) return;
+            currentRating = value;
+            renderStars(value);
+            fetch('/api/shows/' + currentShowId + '/rate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({rating: value})
+            });
+        }
+
         function deleteShow() {
             if (!currentShowId) return;
-            const title = document.getElementById('editTitle').textContent;
-            if (confirm(`Delete "${title}"? This cannot be undone.`)) {
-                const form = document.createElement('form');
+            var title = document.getElementById('editTitle').textContent;
+            if (confirm('Delete "' + title + '"? This cannot be undone.')) {
+                var form = document.createElement('form');
                 form.method = 'POST';
                 form.action = '/delete-show/' + currentShowId;
                 document.body.appendChild(form);
@@ -543,58 +572,26 @@
 
         function quickAction(action) {
             if (!currentShowId) return;
-
-            const title = document.getElementById('editTitle').textContent;
-
-            // Confirm destructive status changes
-            if (action === 'caught-up' && !confirm(`Mark "${title}" as caught up?`)) return;
-            if (action === 'hiatus' && !confirm(`Mark "${title}" as between seasons?`)) return;
-            if (action === 'active' && !confirm(`Mark "${title}" as active with a new season?`)) return;
-
-            const form = document.createElement('form');
+            var title = document.getElementById('editTitle').textContent;
+            if (action === 'caught-up' && !confirm('Mark "' + title + '" as caught up?')) return;
+            if (action === 'hiatus' && !confirm('Mark "' + title + '" as between seasons?')) return;
+            if (action === 'active' && !confirm('Mark "' + title + '" as active with a new season?')) return;
+            var form = document.createElement('form');
             form.method = 'POST';
-
             switch(action) {
-                case 'next':
-                    form.action = '/next-episode/' + currentShowId;
-                    break;
-                case 'caught-up':
-                    form.action = '/mark-caught-up/' + currentShowId;
-                    break;
-                case 'hiatus':
-                    form.action = '/mark-hiatus/' + currentShowId;
-                    break;
-                case 'active':
-                    form.action = '/mark-active/' + currentShowId;
-                    break;
+                case 'next': form.action = '/next-episode/' + currentShowId; break;
+                case 'caught-up': form.action = '/mark-caught-up/' + currentShowId; break;
+                case 'hiatus': form.action = '/mark-hiatus/' + currentShowId; break;
+                case 'active': form.action = '/mark-active/' + currentShowId; break;
             }
-
             document.body.appendChild(form);
             form.submit();
         }
-
-        function openAddModal() {
-            document.getElementById('addModal').classList.add('active');
-        }
-
-        function closeAddModal() {
-            document.getElementById('addModal').classList.remove('active');
-        }
-
-        // Close modals on background click
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) {
-                    this.classList.remove('active');
-                }
-            });
-        });
 
         function quickAction2(action, showId, title) {
             if (action === 'caught-up' && !confirm('Mark "' + title + '" as caught up?')) return;
             if (action === 'active' && !confirm('Mark "' + title + '" as active with a new season?')) return;
             if (action === 'hiatus' && !confirm('Mark "' + title + '" as between seasons?')) return;
-
             var form = document.createElement('form');
             form.method = 'POST';
             switch(action) {
@@ -606,193 +603,82 @@
             form.submit();
         }
 
-        async function dedupShows() {
-            if (!confirm('Remove duplicate shows? The best version of each (with poster/data) will be kept.')) return;
+        // Recommendation card overlay toggle
+        function toggleRecOverlay(card, e) {
+            if (e.target.closest('button') || e.target.closest('form')) return;
+            var overlay = card.querySelector('.rec-overlay');
+            overlay.classList.toggle('active');
+        }
+
+        // Force refresh recommendations
+        async function refreshRecs() {
             try {
-                const response = await fetch('/api/dedup', { method: 'POST' });
-                const data = await response.json();
-                if (data.removed > 0) {
-                    alert(`Removed ${data.removed} duplicate(s)!`);
-                    location.reload();
-                } else {
-                    alert('No duplicates found!');
-                }
+                await fetch('/api/refresh-recommendations', { method: 'POST' });
+                location.reload();
             } catch (err) {
-                alert('Error removing duplicates');
+                alert('Error refreshing recommendations');
             }
+        }
+
+        function openAddModal() {
+            document.getElementById('addModal').classList.add('active');
+        }
+        function closeAddModal() {
+            document.getElementById('addModal').classList.remove('active');
+        }
+
+        // Close modals on background click
+        document.querySelectorAll('.modal').forEach(function(modal) {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) this.classList.remove('active');
+            });
+        });
+
+        // Utility buttons
+        async function dedupShows() {
+            if (!confirm('Remove duplicate shows?')) return;
+            try {
+                var response = await fetch('/api/dedup', { method: 'POST' });
+                var data = await response.json();
+                if (data.removed > 0) { alert('Removed ' + data.removed + ' duplicate(s)!'); location.reload(); }
+                else { alert('No duplicates found!'); }
+            } catch (err) { alert('Error removing duplicates'); }
         }
 
         async function fetchAllPosters() {
             try {
-                const response = await fetch('/api/fetch-all-posters', { method: 'POST' });
-                const data = await response.json();
-                if (data.updated > 0) {
-                    location.reload();
-                } else {
-                    alert('All posters already fetched!');
-                }
-            } catch (err) {
-                alert('Error fetching posters');
-            }
+                var response = await fetch('/api/fetch-all-posters', { method: 'POST' });
+                var data = await response.json();
+                if (data.updated > 0) { location.reload(); }
+                else { alert('All posters already fetched!'); }
+            } catch (err) { alert('Error fetching posters'); }
         }
 
         async function fetchAllTrakt() {
             try {
-                const response = await fetch('/api/fetch-all-trakt', { method: 'POST' });
-                const data = await response.json();
-                if (data.updated > 0) {
-                    alert(`Updated air days for ${data.updated} shows!`);
-                    location.reload();
-                } else {
-                    alert('All shows already have air days set!');
-                }
-            } catch (err) {
-                alert('Error fetching from Trakt');
-            }
-        }
-
-        async function showRecommendations() {
-            loadRecommendations();
-        }
-
-        async function loadRecommendations() {
-            const section = document.getElementById('recsSection');
-            const row = document.getElementById('recsRow');
-            
-            row.innerHTML = '<div class="text-gray-500 text-sm p-4">Loading recommendations...</div>';
-            
-            try {
-                const response = await fetch('/api/recommendations');
-                const data = await response.json();
-                
-                if (data.recommendations && data.recommendations.length > 0) {
-                    row.innerHTML = data.recommendations.map(show => `
-                        <div class="show-card rec-card" style="border: 2px solid #a855f7;">
-                            ${show.poster_url 
-                                ? `<img src="${show.poster_url}" alt="${show.title}" class="show-poster">`
-                                : `<div class="show-poster-placeholder">📺</div>`
-                            }
-                            <div class="show-info">
-                                <div class="show-title">${show.title}</div>
-                                <div class="show-meta">${show.year || ''}</div>
-                            </div>
-                            <div class="rec-actions" style="position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.92); display:none; flex-direction:column; justify-content:space-between; padding:10px; overflow-y:auto;">
-                                <div>
-                                    <div class="text-white font-semibold text-sm mb-1">${show.title}</div>
-                                    <div class="text-gray-400 text-xs leading-relaxed">${show.overview || 'No description available'}</div>
-                                </div>
-                                <div class="flex flex-col gap-2 mt-2">
-                                    <button onclick="addRec('${show.title}', '${show.trakt_slug}')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg w-full">+ Add to List</button>
-                                    <button onclick="dismissRec('${show.trakt_slug}', this)" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg w-full">Already Seen</button>
-                                    <button onclick="dismissRec('${show.trakt_slug}', this)" class="text-gray-500 hover:text-white text-xs py-1">Not Interested</button>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                    
-                    // Add hover behavior
-                    document.querySelectorAll('.rec-card').forEach(card => {
-                        card.addEventListener('click', function(e) {
-                            if (!e.target.closest('button')) {
-                                const actions = this.querySelector('.rec-actions');
-                                actions.style.display = actions.style.display === 'flex' ? 'none' : 'flex';
-                            }
-                        });
-                    });
-                    
-                    section.classList.remove('hidden');
-                } else {
-                    row.innerHTML = '<div class="text-gray-500 text-sm p-4">No recommendations right now. Add more shows!</div>';
-                    section.classList.remove('hidden');
-                }
-            } catch (err) {
-                row.innerHTML = '<div class="text-red-400 text-sm p-4">Error loading recommendations</div>';
-                section.classList.remove('hidden');
-            }
-        }
-
-        async function addRec(title, trakt_slug) {
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/api/recommendations/add';
-            
-            const titleInput = document.createElement('input');
-            titleInput.name = 'title';
-            titleInput.value = title;
-            form.appendChild(titleInput);
-            
-            const slugInput = document.createElement('input');
-            slugInput.name = 'trakt_slug';
-            slugInput.value = trakt_slug;
-            form.appendChild(slugInput);
-            
-            document.body.appendChild(form);
-            form.submit();
-        }
-
-        async function dismissRec(trakt_slug, btn) {
-            const card = btn.closest('.rec-card');
-            card.style.opacity = '0.3';
-            
-            const formData = new FormData();
-            formData.append('trakt_slug', trakt_slug);
-            
-            try {
-                await fetch('/api/recommendations/dismiss', {
-                    method: 'POST',
-                    body: formData
-                });
-                card.remove();
-                
-                // If no more recs, show message
-                const remaining = document.querySelectorAll('.rec-card').length;
-                if (remaining === 0) {
-                    document.getElementById('recsRow').innerHTML = '<div class="text-gray-500 text-sm p-4">Click "Recommend" for more suggestions</div>';
-                }
-            } catch (err) {
-                card.style.opacity = '1';
-            }
+                var response = await fetch('/api/fetch-all-trakt', { method: 'POST' });
+                var data = await response.json();
+                if (data.updated > 0) { alert('Updated air days for ' + data.updated + ' shows!'); location.reload(); }
+                else { alert('All shows already have air days set!'); }
+            } catch (err) { alert('Error fetching from Trakt'); }
         }
 
         // ============ ROKU INTEGRATION ============
-        const ROKU_IP = localStorage.getItem('rokuIp') || '192.168.86.220';
-        
-        // Service to Roku channel ID mapping
-        const ROKU_CHANNELS = {
-            'max': 61322,
-            'hbo max': 61322,
-            'apple tv+': 551012,
-            'appletv+': 551012,
-            'hulu': 2285,
-            'netflix': 12,
-            'peacock': 593099,
-            'paramount+': 37102,
-            'prime video': 13,
-            'amazon prime': 13,
+        var ROKU_IP = localStorage.getItem('rokuIp') || '192.168.86.220';
+        var ROKU_CHANNELS = {
+            'max': 61322, 'hbo max': 61322,
+            'apple tv+': 551012, 'appletv+': 551012,
+            'hulu': 2285, 'netflix': 12, 'peacock': 593099,
+            'paramount+': 37102, 'prime video': 13, 'amazon prime': 13,
             'disney+': 291097
         };
-        
-        let currentService = null;
-        
+
         function playOnRoku() {
-            if (!currentService) {
-                alert('No service detected for this show');
-                return;
-            }
-            
-            const service = currentService.toLowerCase();
-            const channelId = ROKU_CHANNELS[service];
-            
-            if (!channelId) {
-                alert(`Unknown service: ${currentService}. Can't launch on Roku.`);
-                return;
-            }
-            
-            // Roku ECP requires POST - use form + hidden iframe to bypass CORS
-            const url = `http://${ROKU_IP}:8060/launch/${channelId}`;
-            
-            // Create hidden iframe as form target
-            let iframe = document.getElementById('rokuFrame');
+            if (!currentService) { alert('No service detected'); return; }
+            var channelId = ROKU_CHANNELS[currentService.toLowerCase()];
+            if (!channelId) { alert('Unknown service: ' + currentService); return; }
+            var url = 'http://' + ROKU_IP + ':8060/launch/' + channelId;
+            var iframe = document.getElementById('rokuFrame');
             if (!iframe) {
                 iframe = document.createElement('iframe');
                 iframe.id = 'rokuFrame';
@@ -800,45 +686,19 @@
                 iframe.style.display = 'none';
                 document.body.appendChild(iframe);
             }
-            
-            // Create and submit form
-            const form = document.createElement('form');
+            var form = document.createElement('form');
             form.method = 'POST';
             form.action = url;
             form.target = 'rokuFrame';
             document.body.appendChild(form);
-            
-            try {
-                form.submit();
-            } catch(e) {
-                // Expected - cross-origin frame issues, but request still sends
-            }
-            
+            try { form.submit(); } catch(e) {}
             form.remove();
-            
-            // Close modal and show confirmation
             closeEdit();
-            const toast = document.createElement('div');
+            var toast = document.createElement('div');
             toast.className = 'fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm z-50';
-            toast.textContent = `📺 Launching ${currentService}...`;
+            toast.textContent = '📺 Launching ' + currentService + '...';
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2000);
-        }
-        
-        // Update openEdit to store current service
-        const originalOpenEdit = openEdit;
-        openEdit = function(id, title, season, episode, service, status) {
-            currentService = service;
-            originalOpenEdit(id, title, season, episode, service, status);
-        };
-        
-        // Settings: Allow changing Roku IP
-        function setRokuIp() {
-            const ip = prompt('Enter your Roku IP address:', ROKU_IP);
-            if (ip) {
-                localStorage.setItem('rokuIp', ip);
-                alert('Roku IP saved: ' + ip);
-            }
+            setTimeout(function() { toast.remove(); }, 2000);
         }
     </script>
 </body>
