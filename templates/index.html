@@ -210,6 +210,7 @@
             <button onclick="fetchAllPosters()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🖼️ Posters</button>
             <button onclick="fetchAllTrakt()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">📅 Air Days</button>
             <button onclick="loadRecommendations()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">💡 Recommend</button>
+            <button onclick="dedupShows()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🧹 Dedup</button>
         </div>
     </header>
 
@@ -578,6 +579,22 @@
                 }
             });
         });
+
+        async function dedupShows() {
+            if (!confirm('Remove duplicate shows? The best version of each (with poster/data) will be kept.')) return;
+            try {
+                const response = await fetch('/api/dedup', { method: 'POST' });
+                const data = await response.json();
+                if (data.removed > 0) {
+                    alert(`Removed ${data.removed} duplicate(s)!`);
+                    location.reload();
+                } else {
+                    alert('No duplicates found!');
+                }
+            } catch (err) {
+                alert('Error removing duplicates');
+            }
+        }
 
         async function fetchAllPosters() {
             try {

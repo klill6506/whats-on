@@ -205,6 +205,12 @@ async def api_mark_caught_up(show_id: int):
     db.update_show(show_id, current_episode=99, status='current')
     return {"message": "Marked as caught up"}
 
+@app.post("/api/dedup")
+async def api_dedup():
+    """Remove duplicate shows, keeping the best version of each."""
+    removed = db.dedup_shows()
+    return {"removed": removed}
+
 # Form handlers for the web UI
 @app.post("/edit-show/{show_id}")
 async def edit_show(show_id: int, season: int = Form(...), episode: int = Form(...)):

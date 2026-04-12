@@ -241,6 +241,41 @@ def get_dismissed_recommendations():
         cur.execute("SELECT * FROM dismissed_recommendations")
         return [_dict(row) for row in cur.fetchall()]
 
+def dedup_shows():
+    """Remove duplicate shows, keeping the one with a poster (or the most recently updated)."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM shows ORDER BY title, updated_at DESC")
+        all_shows = [_dict(row) for row in cur.fetchall()]
+
+    # Group by lowercase title
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for show in all_shows:
+        groups[show['title'].strip().lower()].append(show)
+
+    removed = 0
+    for title, dupes in groups.items():
+        if len(dupes) < 2:
+            continue
+        # Prefer: has poster > has trakt_slug > most recently updated
+        dupes.sort(key=lambda s: (
+            bool(s.get('poster_url')),
+            bool(s.get('trakt_slug')),
+            s.get('updated_at') or '',
+        ), reverse=True)
+        keeper = dupes[0]
+        for dupe in dupes[1:]:
+            # If keeper is missing poster but dupe has one, grab it
+            if not keeper.get('poster_url') and dupe.get('poster_url'):
+                update_show(keeper['id'], poster_url=dupe['poster_url'])
+            if not keeper.get('trakt_slug') and dupe.get('trakt_slug'):
+                update_show(keeper['id'], trakt_slug=dupe['trakt_slug'])
+            delete_show(dupe['id'])
+            removed += 1
+    return removed
+
+
 def seed_kens_shows():
     """Seed database with Ken's current watchlist, only once ever."""
     with get_db() as conn:
