@@ -220,7 +220,7 @@
         </h2>
         <div class="show-row">
             {% for show in priority_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, '{{ show.title|e }}', {{ show.current_season }}, {{ show.current_episode }}, '{{ show.service }}', '{{ show.status }}')">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -255,7 +255,7 @@
         </h2>
         <div class="show-row">
             {% for show in backup_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, '{{ show.title|e }}', {{ show.current_season }}, {{ show.current_episode }}, '{{ show.service }}', '{{ show.status }}')" style="opacity: 0.85">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})" style="opacity: 0.85">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -290,7 +290,7 @@
         </h2>
         <div class="show-row">
             {% for show in catching_up %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, '{{ show.title|e }}', {{ show.current_season }}, {{ show.current_episode }}, '{{ show.service }}', '{{ show.status }}')">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -332,7 +332,7 @@
         </h2>
         <div class="show-row">
             {% for show in between_seasons %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, '{{ show.title|e }}', {{ show.current_season }}, {{ show.current_episode }}, '{{ show.service }}', '{{ show.status }}')" style="opacity: 0.5; filter: grayscale(50%);">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }})" style="opacity: 0.5; filter: grayscale(50%);">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -532,10 +532,17 @@
 
         function quickAction(action) {
             if (!currentShowId) return;
-            
+
+            const title = document.getElementById('editTitle').textContent;
+
+            // Confirm destructive status changes
+            if (action === 'caught-up' && !confirm(`Mark "${title}" as caught up?`)) return;
+            if (action === 'hiatus' && !confirm(`Mark "${title}" as between seasons?`)) return;
+            if (action === 'active' && !confirm(`Mark "${title}" as active with a new season?`)) return;
+
             const form = document.createElement('form');
             form.method = 'POST';
-            
+
             switch(action) {
                 case 'next':
                     form.action = '/next-episode/' + currentShowId;
@@ -550,7 +557,7 @@
                     form.action = '/mark-active/' + currentShowId;
                     break;
             }
-            
+
             document.body.appendChild(form);
             form.submit();
         }

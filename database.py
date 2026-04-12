@@ -1,6 +1,13 @@
 import os
-from datetime import datetime
 from contextlib import contextmanager
+from datetime import datetime
+
+# Whitelist of columns that can be updated via the API
+ALLOWED_FIELDS = {
+    'title', 'service', 'status', 'current_season', 'current_episode',
+    'total_seasons', 'episodes_in_season', 'air_day', 'priority',
+    'notes', 'tmdb_id', 'poster_url', 'trakt_slug', 'updated_at'
+}
 
 # Check for PostgreSQL (Render) or SQLite (local)
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -59,6 +66,11 @@ if DATABASE_URL:
                     trakt_slug TEXT UNIQUE NOT NULL,
                     dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
             """)
     
     def _dict(row):
@@ -116,6 +128,11 @@ else:
                     trakt_slug TEXT UNIQUE NOT NULL,
                     dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
             """)
     
     def _dict(row):
@@ -166,10 +183,14 @@ def add_show(title, service, current_season=1, current_episode=1, air_day=None,
             return cur.lastrowid
 
 def update_show(show_id, **kwargs):
+    # Filter to allowed fields only (prevents SQL injection via column names)
+    kwargs = {k: v for k, v in kwargs.items() if k in ALLOWED_FIELDS}
+    if not kwargs:
+        return
     with get_db() as conn:
         cur = conn.cursor()
         kwargs['updated_at'] = datetime.now().isoformat()
-        
+
         if DATABASE_URL:
             set_clause = ", ".join(f"{k} = %s" for k in kwargs.keys())
             values = list(kwargs.values()) + [show_id]
@@ -221,15 +242,15 @@ def get_dismissed_recommendations():
         return [_dict(row) for row in cur.fetchall()]
 
 def seed_kens_shows():
-    """Seed database with Ken's current watchlist - only if empty"""
+    """Seed database with Ken's current watchlist, only once ever."""
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) as count FROM shows")
-        result = cur.fetchone()
-        count = result['count'] if DATABASE_URL else result[0]
-        
-        if count > 0:
-            return  # Already has data
+        if DATABASE_URL:
+            cur.execute("SELECT value FROM meta WHERE key = %s", ('seeded',))
+        else:
+            cur.execute("SELECT value FROM meta WHERE key = ?", ('seeded',))
+        if cur.fetchone():
+            return  # Already seeded
     
     shows = [
         ("The Pitt", "Max", 1, 99, "Thursday", 1, "Caught up - new eps weekly", "current"),
@@ -256,6 +277,14 @@ def seed_kens_shows():
             notes=show[6],
             status=show[7]
         )
+
+    # Mark as seeded so we never re-seed
+    with get_db() as conn:
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute("INSERT INTO meta (key, value) VALUES (%s, %s) ON CONFLICT DO NOTHING", ('seeded', '1'))
+        else:
+            cur.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)", ('seeded', '1'))
 
 # Initialize on import
 init_db()

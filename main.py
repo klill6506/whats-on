@@ -1,14 +1,70 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
+from pydantic import BaseModel, field_validator
+from typing import Optional
 import database as db
 import httpx
 import os
 
-app = FastAPI(title="What's On?")
 
-# Templates
+# --- Input validation for PUT endpoint ---
+
+VALID_STATUSES = {'watching', 'current', 'hiatus', 'dropped'}
+VALID_SERVICES = {'Max', 'Apple TV+', 'Hulu', 'Peacock', 'Paramount+', 'Prime Video', 'Netflix', 'Disney+', 'Other'}
+
+
+class ShowUpdate(BaseModel):
+    title: Optional[str] = None
+    service: Optional[str] = None
+    status: Optional[str] = None
+    current_season: Optional[int] = None
+    current_episode: Optional[int] = None
+    air_day: Optional[str] = None
+    priority: Optional[int] = None
+    notes: Optional[str] = None
+    tmdb_id: Optional[int] = None
+    poster_url: Optional[str] = None
+    trakt_slug: Optional[str] = None
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v is not None and v not in VALID_STATUSES:
+            raise ValueError(f'status must be one of {VALID_STATUSES}')
+        return v
+
+    @field_validator('service')
+    @classmethod
+    def validate_service(cls, v):
+        if v is not None and v not in VALID_SERVICES:
+            raise ValueError(f'service must be one of {VALID_SERVICES}')
+        return v
+
+    @field_validator('priority')
+    @classmethod
+    def validate_priority(cls, v):
+        if v is not None and not (1 <= v <= 5):
+            raise ValueError('priority must be between 1 and 5')
+        return v
+
+    @field_validator('current_season', 'current_episode')
+    @classmethod
+    def validate_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError('must be >= 1')
+        return v
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.seed_kens_shows()
+    yield
+
+app = FastAPI(title="What's On?", lifespan=lifespan)
+
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 # TMDB API for posters
@@ -49,10 +105,6 @@ async def search_tmdb(title: str):
     
     return None, None
 
-# Seed Ken's shows on startup
-@app.on_event("startup")
-async def startup():
-    db.seed_kens_shows()
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -129,8 +181,12 @@ async def api_add_show(
     return RedirectResponse(url="/", status_code=303)
 
 @app.put("/api/shows/{show_id}")
-async def api_update_show(show_id: int, request: Request):
-    data = await request.json()
+async def api_update_show(show_id: int, update: ShowUpdate):
+    if not db.get_show(show_id):
+        raise HTTPException(status_code=404, detail="Show not found")
+    data = update.model_dump(exclude_none=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
     db.update_show(show_id, **data)
     return {"message": "Show updated"}
 
@@ -158,8 +214,8 @@ async def edit_show(show_id: int, season: int = Form(...), episode: int = Form(.
 @app.post("/next-episode/{show_id}")
 async def next_episode(show_id: int):
     show = db.get_show(show_id)
-    if show:
-        new_ep = show['current_episode'] + 1 if show['current_episode'] != 99 else 2
+    if show and show['current_episode'] != 99:
+        new_ep = show['current_episode'] + 1
         db.update_show(show_id, current_episode=new_ep, status='watching')
     return RedirectResponse(url="/", status_code=303)
 
