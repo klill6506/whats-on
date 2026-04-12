@@ -297,11 +297,16 @@
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-                
+
                 <div class="show-progress" style="background: rgba(59, 130, 246, 0.9);">
                     S{{ show.current_season }}E{{ show.current_episode }}
                 </div>
-                
+
+                <button onclick="event.stopPropagation(); quickAction2('caught-up', {{ show.id }}, {{ show.title|tojson }})"
+                    class="quick-action-btn" style="position:absolute;top:8px;left:8px;background:rgba(59,130,246,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
+                    ✓ Caught Up
+                </button>
+
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -339,7 +344,12 @@
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-                
+
+                <button onclick="event.stopPropagation(); quickAction2('active', {{ show.id }}, {{ show.title|tojson }})"
+                    class="quick-action-btn" style="position:absolute;top:8px;right:8px;background:rgba(16,185,129,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
+                    🎉 New Season
+                </button>
+
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
@@ -579,6 +589,22 @@
                 }
             });
         });
+
+        function quickAction2(action, showId, title) {
+            if (action === 'caught-up' && !confirm('Mark "' + title + '" as caught up?')) return;
+            if (action === 'active' && !confirm('Mark "' + title + '" as active with a new season?')) return;
+            if (action === 'hiatus' && !confirm('Mark "' + title + '" as between seasons?')) return;
+
+            var form = document.createElement('form');
+            form.method = 'POST';
+            switch(action) {
+                case 'caught-up': form.action = '/mark-caught-up/' + showId; break;
+                case 'active': form.action = '/mark-active/' + showId; break;
+                case 'hiatus': form.action = '/mark-hiatus/' + showId; break;
+            }
+            document.body.appendChild(form);
+            form.submit();
+        }
 
         async function dedupShows() {
             if (!confirm('Remove duplicate shows? The best version of each (with poster/data) will be kept.')) return;
