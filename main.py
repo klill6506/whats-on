@@ -5,10 +5,14 @@ from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env before importing modules that read env vars at import time (database.py)
-load_dotenv()
+# Load .env (next to this file) before importing modules that read env vars at import
+# time (database.py). Explicit path so it works regardless of cwd. override=True so the
+# local .env wins over a stale/empty shell var of the same name. On Render there's no
+# .env file, so this is a harmless no-op and Render's injected env vars are untouched.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 import anthropic
 import httpx
@@ -56,12 +60,18 @@ def get_anthropic() -> anthropic.AsyncAnthropic:
     failure is obvious rather than a 500 deep in a request."""
     global _anthropic_client
     if _anthropic_client is None:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not set. Add it to .env (local) or the Render "
                 "dashboard (production) before tagging or generating reviews."
             )
-        _anthropic_client = anthropic.AsyncAnthropic()
+        # Some environments export an empty ANTHROPIC_AUTH_TOKEN, which the SDK would
+        # turn into an illegal 'Bearer ' header (preferred over x-api-key). Drop it so
+        # the explicit api_key is used.
+        if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
     return _anthropic_client
 
 
