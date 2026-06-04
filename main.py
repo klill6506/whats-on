@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import random
 from collections import Counter, defaultdict
@@ -361,108 +362,135 @@ async def get_tmdb_providers(tmdb_id: int, client: httpx.AsyncClient) -> list:
 
 # ============ RECOMMENDATION ENGINE ============
 
+# --- Phase 3: signed taste profile ---
+
+def compute_profile(rated):
+    """Pure: given [(rating, tags_dict), ...] build the signed taste vector.
+    weight = rating - 3; profile[dim] = sum(weight * tag[dim]) / sum(|weight|).
+    Returns {} when there's no usable signal (denominator 0)."""
+    num = {d: 0.0 for d in db.TAG_DIMENSIONS}
+    denom = 0.0
+    for rating, tags in rated:
+        if rating is None or tags is None:
+            continue
+        w = rating - 3
+        denom += abs(w)
+        for d in db.TAG_DIMENSIONS:
+            num[d] += w * (tags.get(d) or 0)
+    if denom == 0:
+        return {}
+    return {d: num[d] / denom for d in db.TAG_DIMENSIONS}
+
+
+def build_taste_profile():
+    """Signed taste profile from rated library shows that have tags."""
+    tags_by_slug = {t['trakt_slug']: t for t in db.get_all_tags()}
+    rated = []
+    for show in db.get_all_shows():
+        slug, rating = show.get('trakt_slug'), show.get('rating')
+        if not slug or rating is None:
+            continue
+        tags = tags_by_slug.get(slug)
+        if tags:
+            rated.append((rating, tags))
+    return compute_profile(rated)
+
+
+def cosine_similarity(a, b):
+    """Cosine similarity over the taste dimensions, in [-1, 1]. 0 if either vector is zero."""
+    dims = db.TAG_DIMENSIONS
+    dot = sum((a.get(d) or 0) * (b.get(d) or 0) for d in dims)
+    na = math.sqrt(sum((a.get(d) or 0) ** 2 for d in dims))
+    nb = math.sqrt(sum((b.get(d) or 0) ** 2 for d in dims))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def score_candidate(candidate_tags, profile):
+    """Map cosine similarity [-1, 1] to a 0-100 match score. 50 = orthogonal/neutral."""
+    cos = cosine_similarity(candidate_tags, profile)
+    return round((cos + 1) / 2 * 100)
+
+
+# --- Phase 4: cosine-based cache refresh ---
+
 async def refresh_recommendation_cache(client: httpx.AsyncClient):
-    """Rebuild the recommendation cache using taste-aware scoring."""
+    """Rebuild the recommendation cache by scoring Trakt 'related' candidates against
+    Ken's signed taste profile via cosine similarity. Deterministic: no random factor and
+    no popularity bonus baked into the score (Trakt community rating is a tiebreaker only)."""
     shows = db.get_all_shows()
     if not shows:
         return
 
-    existing_slugs = {s.get('trakt_slug') for s in shows if s.get('trakt_slug')}
+    profile = build_taste_profile()
+
     existing_titles = {s['title'].lower() for s in shows}
-    dismissed_slugs = db.get_dismissed_slugs()
-    excluded = existing_slugs | dismissed_slugs
+    excluded = {s.get('trakt_slug') for s in shows if s.get('trakt_slug')} | db.get_dismissed_slugs()
 
-    # Step 1: Build weighted genre profile from ALL shows
-    genre_weights = defaultdict(float)
-    shows_with_slugs = []
-    for show in shows:
-        slug = show.get('trakt_slug')
-        if not slug:
-            # Try to find slug via search
-            info = await search_trakt(show['title'], client)
-            if info and info.get('trakt_slug'):
-                slug = info['trakt_slug']
-                db.update_show(show['id'], trakt_slug=slug)
-            else:
-                continue
-        rating = show.get('rating') or 2  # unrated defaults to 2
-        shows_with_slugs.append((show, slug, rating))
+    # Candidate discovery: Trakt "related" for the top-rated library shows.
+    rated_with_slug = [s for s in shows if s.get('trakt_slug') and s.get('rating')]
+    top_shows = sorted(rated_with_slug, key=lambda s: s['rating'], reverse=True)[:5]
 
-        details = await get_trakt_show_details(slug, client)
-        if details:
-            for genre in details.get('genres', []):
-                genre_weights[genre] += rating
-
-    # Step 2: Fetch related shows for top-rated shows (collaborative filtering)
-    top_shows = sorted(shows_with_slugs, key=lambda x: x[2], reverse=True)[:5]
-    candidates = {}  # slug -> {data + _score}
-
-    for show, slug, rating in top_shows:
-        related = await fetch_trakt_related(slug, client, limit=15)
+    candidates = {}  # slug -> rec dict from Trakt
+    for show in top_shows:
+        related = await fetch_trakt_related(show['trakt_slug'], client, limit=15)
         for rec in related:
-            rec_slug = rec.get("ids", {}).get("slug")
-            if not rec_slug or rec_slug in excluded or rec.get("title", "").lower() in existing_titles:
+            rec_slug = rec.get('ids', {}).get('slug')
+            if not rec_slug or rec_slug in excluded or rec.get('title', '').lower() in existing_titles:
                 continue
-            if rec_slug not in candidates:
-                candidates[rec_slug] = rec
-                candidates[rec_slug]['_score'] = 0.0
-                candidates[rec_slug]['_source'] = show['title']
-            # Source weight: higher-rated source shows produce stronger signal
-            candidates[rec_slug]['_score'] += rating * 2
+            candidates.setdefault(rec_slug, rec)
 
-    # Step 3: Score by genre affinity
-    max_genre_weight = max(genre_weights.values()) if genre_weights else 1
+    # Score each candidate by cosine similarity to the profile; tag on the fly if missing.
+    scored = []
     for slug, rec in candidates.items():
-        genres = rec.get('genres', [])
-        genre_score = sum(genre_weights.get(g, 0) for g in genres) / max_genre_weight
-        rec['_score'] += genre_score * 5
-        # Small random factor for rotation variety
-        rec['_score'] += random.random() * 2
-        # Bonus for highly-rated shows on Trakt
-        trakt_rating = rec.get('rating', 0) or 0
-        if trakt_rating >= 8.0:
-            rec['_score'] += 3
-        elif trakt_rating >= 7.0:
-            rec['_score'] += 1
+        tags = db.get_tags(slug)
+        if not tags:
+            try:
+                t = await ai_tag_show(rec.get('title', ''), rec.get('overview', ''), rec.get('genres', []))
+                db.upsert_tags(slug, source='ai', **t)
+                tags = db.get_tags(slug)
+            except Exception as e:
+                print(f"On-the-fly tag failed for {slug}: {e}")
+                continue
+        match_score = score_candidate(tags, profile) if profile else 50
+        scored.append((match_score, rec))
 
-    # Step 4: Sort and take top 40 for TMDB enrichment
-    sorted_candidates = sorted(candidates.values(), key=lambda x: x.get('_score', 0), reverse=True)[:40]
+    # Deterministic ordering: score desc, Trakt rating as a tiny tiebreaker, then slug.
+    scored.sort(
+        key=lambda x: (x[0], x[1].get('rating') or 0, x[1].get('ids', {}).get('slug', '')),
+        reverse=True,
+    )
+    top = scored[:40]
 
-    # Step 5: Enrich with TMDB (poster + streaming providers)
+    # Enrich with TMDB (poster + providers) and build cache rows.
     new_cache = []
-    for rec in sorted_candidates:
+    for match_score, rec in top:
         title = rec.get('title', '')
         tmdb_id, poster_url = await search_tmdb(title, client)
-
-        services = []
-        if tmdb_id:
-            services = await get_tmdb_providers(tmdb_id, client)
-
-        genres = ",".join(rec.get('genres', []))
-        streaming = ",".join(services)
-        overview = rec.get('overview', '') or ''
+        services = await get_tmdb_providers(tmdb_id, client) if tmdb_id else []
+        overview = rec.get('overview') or ''
         if len(overview) > 300:
             overview = overview[:300] + '...'
-
         new_cache.append({
             'trakt_slug': rec.get('ids', {}).get('slug', ''),
             'title': title,
             'year': rec.get('year'),
             'overview': overview,
             'poster_url': poster_url,
-            'score': rec.get('_score', 0),
-            'source_show': rec.get('_source', ''),
-            'genres': genres,
-            'streaming_services': streaming,
+            'score': match_score,
+            'source_show': '',  # superseded by the math-based "why" coming in Phase 5
+            'genres': ",".join(rec.get('genres', [])),
+            'streaming_services': ",".join(services),
         })
 
-    # Step 6: Write to cache (only replace after new data is ready)
     if new_cache:
         db.clear_recommendation_cache()
         for item in new_cache:
             db.insert_cached_recommendation(**item)
 
-    print(f"Recommendation cache refreshed: {len(new_cache)} candidates")
+    print(f"Recommendation cache refreshed: {len(new_cache)} candidates "
+          f"(profile dims set: {len(profile)})")
 
 
 # ============ PAGES ============
