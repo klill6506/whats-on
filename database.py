@@ -335,6 +335,11 @@ def get_all_tags():
         return [_dict(row) for row in cur.fetchall()]
 
 
+def delete_tags(slug):
+    with get_db() as conn:
+        conn.cursor().execute(f"DELETE FROM show_tags WHERE trakt_slug = {_ph()}", (slug,))
+
+
 def upsert_tags(slug, source='ai', **dims):
     """Insert or update tags for a slug. Idempotent — re-tagging overwrites the
     existing row. Both engines support ON CONFLICT upsert (Postgres + SQLite >= 3.24)."""

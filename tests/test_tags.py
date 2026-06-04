@@ -4,16 +4,8 @@ The AI tagger itself (ai_tag_show) calls the Anthropic API and is not unit-teste
 here; what's deterministic and worth locking down is the clamp logic and the
 SQLite upsert/get roundtrip.
 """
-import os
-import tempfile
-
-# Point database.py at a throwaway SQLite file BEFORE importing it — it reads
-# DATABASE_PATH and runs init_db() at import time.
-os.environ.pop('DATABASE_URL', None)
-_tmpdir = tempfile.mkdtemp()
-os.environ['DATABASE_PATH'] = os.path.join(_tmpdir, 'test_tags.db')
-
-import database as db  # noqa: E402
+# conftest.py points DATABASE_PATH at a throwaway SQLite file before this imports.
+import database as db
 
 
 def test_clamp_tags_bounds_and_fills():

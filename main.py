@@ -200,18 +200,31 @@ def trakt_headers():
         "Content-Type": "application/json"
     }
 
+def _pick_trakt_match(results, title):
+    """Choose the best show from Trakt search results. Prefer an exact (case-insensitive)
+    title match, keeping Trakt's own ordering (results come back ranked by relevance/
+    popularity, so the well-known show wins). Fall back to Trakt's top result if no exact
+    match. Avoids the old data[0] behavior that matched e.g. 'Landman' -> 'man-land'."""
+    shows = [r["show"] for r in (results or []) if r.get("show")]
+    if not shows:
+        return None
+    q = title.strip().lower()
+    for s in shows:
+        if (s.get("title") or "").strip().lower() == q:
+            return s
+    return shows[0]
+
 async def search_trakt(title: str, client: httpx.AsyncClient = None):
     close = client is None
     client = client or httpx.AsyncClient(timeout=15.0)
     try:
         resp = await client.get(
             f"{TRAKT_BASE_URL}/search/show",
-            params={"query": title},
+            params={"query": title, "limit": 10},
             headers=trakt_headers()
         )
-        data = resp.json()
-        if data:
-            show = data[0]["show"]
+        show = _pick_trakt_match(resp.json(), title)
+        if show:
             return {
                 "trakt_id": show.get("ids", {}).get("trakt"),
                 "trakt_slug": show.get("ids", {}).get("slug"),
