@@ -86,6 +86,15 @@ if DATABASE_URL:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS show_tags (
+                    trakt_slug TEXT PRIMARY KEY,
+                    crime INTEGER, legal INTEGER, comedy INTEGER, darkness INTEGER, prestige INTEGER,
+                    pace INTEGER, sentimentality INTEGER, mystery INTEGER, ending_quality INTEGER,
+                    violence INTEGER, rewatchability INTEGER,
+                    source TEXT,
+                    tagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             # Migrate: add rating column if missing (existing DBs)
             _migrate_add_column(cur, 'shows', 'rating', 'INTEGER')
@@ -170,6 +179,15 @@ else:
                 CREATE TABLE IF NOT EXISTS meta (
                     key TEXT PRIMARY KEY,
                     value TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS show_tags (
+                    trakt_slug TEXT PRIMARY KEY,
+                    crime INTEGER, legal INTEGER, comedy INTEGER, darkness INTEGER, prestige INTEGER,
+                    pace INTEGER, sentimentality INTEGER, mystery INTEGER, ending_quality INTEGER,
+                    violence INTEGER, rewatchability INTEGER,
+                    source TEXT,
+                    tagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             # Migrate: add rating column if missing (existing DBs)
@@ -279,6 +297,61 @@ def get_dismissed_recommendations():
         return [_dict(row) for row in cur.fetchall()]
 
 
+# ============ Taste Tags ============
+
+# The 11 taste dimensions, each scored 0-5. Descriptive (how much of the trait
+# the show has), not good/bad — polarity is learned from Ken's ratings.
+TAG_DIMENSIONS = [
+    'crime', 'legal', 'comedy', 'darkness', 'prestige', 'pace',
+    'sentimentality', 'mystery', 'ending_quality', 'violence', 'rewatchability'
+]
+
+
+def clamp_tags(data):
+    """Coerce a dict of dimension -> value into valid 0-5 integers for every
+    dimension. Missing or non-numeric values become 0. Pure function — the
+    validation step the AI tagger must run before storing."""
+    out = {}
+    for d in TAG_DIMENSIONS:
+        try:
+            v = int(data.get(d, 0))
+        except (TypeError, ValueError):
+            v = 0
+        out[d] = max(0, min(5, v))
+    return out
+
+
+def get_tags(slug):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM show_tags WHERE trakt_slug = {_ph()}", (slug,))
+        return _dict(cur.fetchone())
+
+
+def get_all_tags():
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM show_tags")
+        return [_dict(row) for row in cur.fetchall()]
+
+
+def upsert_tags(slug, source='ai', **dims):
+    """Insert or update tags for a slug. Idempotent — re-tagging overwrites the
+    existing row. Both engines support ON CONFLICT upsert (Postgres + SQLite >= 3.24)."""
+    dims = clamp_tags(dims)
+    cols = TAG_DIMENSIONS
+    col_list = ", ".join(['trakt_slug'] + cols + ['source'])
+    ph = _ph(len(cols) + 2)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols + ['source'])
+    sql = f"""
+        INSERT INTO show_tags ({col_list}) VALUES ({ph})
+        ON CONFLICT (trakt_slug) DO UPDATE SET {updates}, tagged_at = CURRENT_TIMESTAMP
+    """
+    params = [slug] + [dims[c] for c in cols] + [source]
+    with get_db() as conn:
+        conn.cursor().execute(sql, params)
+
+
 # ============ Recommendation Cache ============
 
 def clear_recommendation_cache():
@@ -339,6 +412,14 @@ def get_recommendation_count():
         cur.execute("SELECT COUNT(*) as cnt FROM recommendation_cache")
         row = cur.fetchone()
         return row['cnt'] if DATABASE_URL else row[0]
+
+
+def get_all_cached_recommendations():
+    """Raw cached recs (unfiltered) — used by the tagger to find candidates missing tags."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recommendation_cache")
+        return [_dict(row) for row in cur.fetchall()]
 
 
 # ============ Dedup ============

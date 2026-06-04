@@ -1,9 +1,16 @@
+import json
 import os
 import random
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+from dotenv import load_dotenv
+
+# Load .env before importing modules that read env vars at import time (database.py)
+load_dotenv()
+
+import anthropic
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -34,6 +41,72 @@ CACHE_MAX_AGE = timedelta(hours=12)
 
 VALID_STATUSES = {'watching', 'current', 'hiatus', 'dropped'}
 VALID_SERVICES = USER_SERVICES | {'Disney+', 'Other'}
+
+
+# --- AI taste tagger (Anthropic) ---
+
+# Default to the most capable model; override with ANTHROPIC_MODEL (e.g. claude-haiku-4-5
+# to save cost). Model IDs are current as of the claude-api skill cache (2026-05).
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
+
+_anthropic_client = None
+
+def get_anthropic() -> anthropic.AsyncAnthropic:
+    """Lazily build the async Anthropic client. Raises if the key is missing so the
+    failure is obvious rather than a 500 deep in a request."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is not set. Add it to .env (local) or the Render "
+                "dashboard (production) before tagging or generating reviews."
+            )
+        _anthropic_client = anthropic.AsyncAnthropic()
+    return _anthropic_client
+
+
+# JSON schema for structured output. Numeric min/max aren't supported by structured
+# outputs, so the 0-5 bound is enforced in code via db.clamp_tags().
+_TAG_SCHEMA = {
+    "type": "object",
+    "properties": {d: {"type": "integer"} for d in db.TAG_DIMENSIONS},
+    "required": db.TAG_DIMENSIONS,
+    "additionalProperties": False,
+}
+
+_TAG_SYSTEM = """You are a TV taste analyst. Rate a show on 11 descriptive dimensions, each an integer 0-5.
+
+These describe HOW MUCH of a trait the show has — they are NOT good/bad judgments:
+- crime: criminal activity, investigations, the underworld
+- legal: courtroom, lawyers, the justice system
+- comedy: how funny / light it is
+- darkness: bleak, grim, morally heavy tone
+- prestige: elevated "prestige TV" craft and ambition
+- pace: how propulsive it is (0 = slow burn, 5 = breakneck)
+- sentimentality: emotional, heart-tugging, earnest feeling
+- mystery: puzzles, whodunits, unanswered questions driving the plot
+- ending_quality: how satisfying and well-constructed its episode/season endings are
+- violence: on-screen violence and intensity
+- rewatchability: how much it rewards repeat viewing
+
+0 = none of this trait, 5 = saturated with it. Return only the JSON object with all 11 integer fields."""
+
+
+async def ai_tag_show(title, overview, genres) -> dict:
+    """Ask Claude to score a show on the 11 taste dimensions. Returns a validated,
+    clamped dict of dimension -> int(0-5)."""
+    client = get_anthropic()
+    genre_str = ", ".join(genres) if genres else "unknown"
+    user = f"Title: {title}\nGenres: {genre_str}\nOverview: {overview or 'No overview available.'}"
+    resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=400,
+        system=_TAG_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+        output_config={"format": {"type": "json_schema", "schema": _TAG_SCHEMA}},
+    )
+    text = next((b.text for b in resp.content if b.type == "text"), "{}")
+    return db.clamp_tags(json.loads(text))
 
 
 # --- Pydantic models ---
@@ -504,6 +577,61 @@ async def api_refresh_recommendations(request: Request):
     client = _client(request)
     await refresh_recommendation_cache(client)
     return {"message": "Recommendations refreshed"}
+
+
+@app.post("/api/admin/retag")
+async def admin_retag(request: Request):
+    """Tag every library show + cached candidate that's missing taste tags.
+    Idempotent — slugs already in show_tags are skipped. Run once locally to seed
+    the existing library (pennies). Requires ANTHROPIC_API_KEY."""
+    client = _client(request)
+    tagged, skipped, failed = 0, 0, 0
+    results = []
+
+    # --- Library shows ---
+    for show in db.get_all_shows():
+        slug = show.get('trakt_slug')
+        if not slug:
+            info = await search_trakt(show['title'], client)
+            if info and info.get('trakt_slug'):
+                slug = info['trakt_slug']
+                db.update_show(show['id'], trakt_slug=slug)
+        if not slug:
+            failed += 1
+            results.append({"title": show['title'], "status": "no_trakt_slug"})
+            continue
+        if db.get_tags(slug):
+            skipped += 1
+            continue
+        details = await get_trakt_show_details(slug, client)
+        overview = details.get('overview') if details else None
+        genres = details.get('genres', []) if details else []
+        try:
+            tags = await ai_tag_show(show['title'], overview, genres)
+            db.upsert_tags(slug, source='ai', **tags)
+            tagged += 1
+            results.append({"title": show['title'], "slug": slug, **tags})
+        except Exception as e:
+            print(f"Tagging failed for {show['title']}: {e}")
+            failed += 1
+            results.append({"title": show['title'], "status": f"error: {e}"})
+
+    # --- Cached recommendation candidates ---
+    for rec in db.get_all_cached_recommendations():
+        slug = rec.get('trakt_slug')
+        if not slug or db.get_tags(slug):
+            skipped += 1
+            continue
+        genres = [g.strip() for g in (rec.get('genres') or '').split(',') if g.strip()]
+        try:
+            tags = await ai_tag_show(rec['title'], rec.get('overview'), genres)
+            db.upsert_tags(slug, source='ai', **tags)
+            tagged += 1
+        except Exception as e:
+            print(f"Tagging failed for candidate {rec.get('title')}: {e}")
+            failed += 1
+
+    return {"tagged": tagged, "skipped": skipped, "failed": failed, "shows": results}
 
 
 # ============ FORM HANDLERS (web UI) ============
