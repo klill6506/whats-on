@@ -6,3 +6,9 @@ __pycache__/
 .DS_Store
 venv/
 .venv/
+
+# Project-tracking files — local source of truth, mirrored to Google Drive by sync script
+CLAUDE.md
+MEMORY.md
+STATUS.md
+DECISIONS.md
