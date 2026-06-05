@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 import os
@@ -620,6 +621,25 @@ async def refresh_recommendation_cache(client: httpx.AsyncClient):
 
 # ============ PAGES ============
 
+_refresh_in_progress = False
+
+
+async def _background_refresh(client):
+    """Run a cache refresh without blocking the request that triggered it. Guarded so
+    concurrent page loads don't fire overlapping refreshes (a refresh makes dozens of
+    API calls)."""
+    global _refresh_in_progress
+    if _refresh_in_progress:
+        return
+    _refresh_in_progress = True
+    try:
+        await refresh_recommendation_cache(client)
+    except Exception as e:
+        print(f"Background refresh failed: {e}")
+    finally:
+        _refresh_in_progress = False
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     shows = db.get_all_shows()
@@ -649,11 +669,12 @@ async def home(request: Request):
     # --- Recommendations (server-side, cached) ---
     recommendations = []
     try:
-        # Check if cache needs refresh
+        # If the cache is stale, refresh it in the BACKGROUND so the page never blocks on
+        # the recommendation engine's API calls (tagging + reviews). This request serves
+        # whatever is currently cached; the next load picks up the fresh data.
         cache_age = db.get_cache_age()
-        if not cache_age or (datetime.now() - cache_age) > CACHE_MAX_AGE:
-            client = _client(request)
-            await refresh_recommendation_cache(client)
+        if (not cache_age or (datetime.now() - cache_age) > CACHE_MAX_AGE) and not _refresh_in_progress:
+            asyncio.create_task(_background_refresh(_client(request)))
 
         recs, total = db.get_cached_recommendations(USER_SERVICES, limit=6, offset=0)
         if total > 6:
