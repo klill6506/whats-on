@@ -68,3 +68,28 @@ def test_disliked_axis_pushes_candidate_away():
 def test_empty_profile_safe():
     # cosine against an all-zero / empty profile is 0 -> neutral 50, never a crash
     assert main.score_candidate(_tags(crime=5), {}) == 50
+
+
+def test_explain_match_names_liked_axis():
+    profile = {**{d: 0 for d in DIMS}, 'crime': 2.0, 'mystery': 1.5}
+    why, why_not = main.explain_match(_tags(crime=5, mystery=4), profile)
+    assert "crime" in why
+    assert why_not == "Nothing obvious working against it."
+
+
+def test_explain_match_flags_disliked_axis():
+    profile = {**{d: 0 for d in DIMS}, 'sentimentality': -2.0}
+    why, why_not = main.explain_match(_tags(sentimentality=5), profile)
+    assert "sentimentality" in why_not
+    assert why_not.endswith(".")
+
+
+def test_explain_match_flags_missing_liked_axis():
+    # Profile strongly likes fast pace; candidate is slow -> "lighter on a fast pace"
+    profile = {**{d: 0 for d in DIMS}, 'pace': 2.5}
+    why, why_not = main.explain_match(_tags(pace=1), profile)
+    assert "lighter on" in why_not.lower() and "pace" in why_not
+
+
+def test_explain_match_empty_profile():
+    assert main.explain_match(_tags(crime=5), {}) == ("", "")

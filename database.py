@@ -9,6 +9,17 @@ ALLOWED_FIELDS = {
     'notes', 'tmdb_id', 'poster_url', 'trakt_slug', 'updated_at'
 }
 
+# Phase 5 review/explanation columns added to recommendation_cache (name, type).
+# Listed once so both the CREATE blocks and the migrations stay in sync.
+_REC_REVIEW_COLUMNS = [
+    ('match_score', 'INTEGER'),
+    ('verdict', 'TEXT'),
+    ('risk', 'TEXT'),
+    ('watch_plan', 'TEXT'),
+    ('why_recommended', 'TEXT'),
+    ('why_might_fail', 'TEXT'),
+]
+
 # Check for PostgreSQL (Render) or SQLite (local)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -79,6 +90,12 @@ if DATABASE_URL:
                     source_show TEXT,
                     genres TEXT,
                     streaming_services TEXT,
+                    match_score INTEGER,
+                    verdict TEXT,
+                    risk TEXT,
+                    watch_plan TEXT,
+                    why_recommended TEXT,
+                    why_might_fail TEXT,
                     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -98,6 +115,9 @@ if DATABASE_URL:
             """)
             # Migrate: add rating column if missing (existing DBs)
             _migrate_add_column(cur, 'shows', 'rating', 'INTEGER')
+            # Migrate: Phase 5 review/explanation columns on recommendation_cache
+            for _col, _typ in _REC_REVIEW_COLUMNS:
+                _migrate_add_column(cur, 'recommendation_cache', _col, _typ)
 
     def _migrate_add_column(cur, table, column, col_type):
         try:
@@ -173,6 +193,12 @@ else:
                     source_show TEXT,
                     genres TEXT,
                     streaming_services TEXT,
+                    match_score INTEGER,
+                    verdict TEXT,
+                    risk TEXT,
+                    watch_plan TEXT,
+                    why_recommended TEXT,
+                    why_might_fail TEXT,
                     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -194,6 +220,11 @@ else:
             columns = [row[1] for row in conn.execute("PRAGMA table_info(shows)").fetchall()]
             if 'rating' not in columns:
                 conn.execute("ALTER TABLE shows ADD COLUMN rating INTEGER")
+            # Migrate: Phase 5 review/explanation columns on recommendation_cache
+            rec_cols = [row[1] for row in conn.execute("PRAGMA table_info(recommendation_cache)").fetchall()]
+            for _col, _typ in _REC_REVIEW_COLUMNS:
+                if _col not in rec_cols:
+                    conn.execute(f"ALTER TABLE recommendation_cache ADD COLUMN {_col} {_typ}")
 
     def _dict(row):
         return dict(row) if row else None
@@ -364,14 +395,20 @@ def clear_recommendation_cache():
         conn.cursor().execute("DELETE FROM recommendation_cache")
 
 def insert_cached_recommendation(trakt_slug, title, year, overview, poster_url,
-                                  score, source_show, genres, streaming_services):
+                                  score, source_show, genres, streaming_services,
+                                  match_score=None, verdict=None, risk=None,
+                                  watch_plan=None, why_recommended=None, why_might_fail=None):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(f"""
             INSERT INTO recommendation_cache
-                (trakt_slug, title, year, overview, poster_url, score, source_show, genres, streaming_services)
-            VALUES ({_ph(9)})
-        """, (trakt_slug, title, year, overview, poster_url, score, source_show, genres, streaming_services))
+                (trakt_slug, title, year, overview, poster_url, score, source_show,
+                 genres, streaming_services, match_score, verdict, risk, watch_plan,
+                 why_recommended, why_might_fail)
+            VALUES ({_ph(15)})
+        """, (trakt_slug, title, year, overview, poster_url, score, source_show,
+              genres, streaming_services, match_score, verdict, risk, watch_plan,
+              why_recommended, why_might_fail))
 
 def get_cache_age():
     """Returns the cached_at of the newest row, or None if empty."""

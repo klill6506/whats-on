@@ -72,7 +72,9 @@ def get_anthropic() -> anthropic.AsyncAnthropic:
         # the explicit api_key is used.
         if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
             os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
+        # max_retries above the default 2 — a full cache refresh fires dozens of calls and
+        # transient 529 (overloaded) responses are common in a batch.
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=5)
     return _anthropic_client
 
 
@@ -413,6 +415,103 @@ def score_candidate(candidate_tags, profile):
     return round((cos + 1) / 2 * 100)
 
 
+# --- Phase 5: explanations (math) + AI review (Henry voice) ---
+
+DIM_LABELS = {
+    'crime': 'crime', 'legal': 'legal/courtroom', 'comedy': 'comedy',
+    'darkness': 'a dark tone', 'prestige': 'prestige polish', 'pace': 'a fast pace',
+    'sentimentality': 'sentimentality', 'mystery': 'mystery',
+    'ending_quality': 'strong endings', 'violence': 'violence',
+    'rewatchability': 'rewatchability',
+}
+
+
+def _join_labels(dims_list):
+    labels = [DIM_LABELS.get(d, d) for d in dims_list]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + ", and " + labels[-1]
+
+
+def explain_match(candidate_tags, profile):
+    """Deterministic, math-derived (why_recommended, why_might_fail) from the candidate's
+    tag vector vs the signed taste profile. No AI — cheap and trustworthy."""
+    if not profile:
+        return ("", "")
+    dims = db.TAG_DIMENSIONS
+    c = {d: candidate_tags.get(d) or 0 for d in dims}
+    p = {d: profile.get(d) or 0 for d in dims}
+
+    # Recommend: candidate delivers a trait Ken likes (profile positive, candidate high).
+    liked = sorted([d for d in dims if p[d] > 0.3 and c[d] >= 3],
+                   key=lambda d: p[d] * c[d], reverse=True)[:3]
+    why = f"High on {_join_labels(liked)}." if liked else "A change of pace from your usual."
+
+    # Might fail: (a) leans into a disliked trait; (b) light on a strongly-liked trait.
+    disliked = sorted([d for d in dims if p[d] < -0.3 and c[d] >= 3],
+                      key=lambda d: p[d] * c[d])[:2]
+    missing = sorted([d for d in dims if p[d] > 1.0 and c[d] <= 2],
+                     key=lambda d: p[d], reverse=True)[:2]
+    parts = []
+    if disliked:
+        parts.append(f"leans into {_join_labels(disliked)}")
+    if missing:
+        parts.append(f"lighter on {_join_labels(missing)} than your usual")
+    if parts:
+        s = "; ".join(parts)
+        why_not = s[0].upper() + s[1:] + "."
+    else:
+        why_not = "Nothing obvious working against it."
+    return (why, why_not)
+
+
+_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string"},
+        "risk": {"type": "string"},
+        "watch_plan": {"type": "string"},
+    },
+    "required": ["verdict", "risk", "watch_plan"],
+    "additionalProperties": False,
+}
+
+_REVIEW_SYSTEM = """You are Henry, the wry mascot of Ken's personal TV tracker. Voice: dry,
+classy, a little snarky, never cruel, economical. You're given a show, how strongly it
+matches Ken's taste (0-100), and its trait scores (0-5). Write three short lines:
+- verdict: one sentence on whether it's his lane and why (blunt is fine).
+- risk: one sentence naming the single most likely reason he bails.
+- watch_plan: one sentence of concrete advice (e.g. "Give it two episodes; bail with honor if you're not in.").
+Each line under ~25 words. No emoji, no preamble. Return only the JSON."""
+
+
+async def ai_review(title, overview, match_score, tags):
+    """One Henry-voice call -> {verdict, risk, watch_plan}. Cached by the caller; never
+    invoked on page load."""
+    client = get_anthropic()
+    trait_str = ", ".join(f"{d} {tags.get(d, 0)}" for d in db.TAG_DIMENSIONS)
+    user = (f"Show: {title}\nMatch score: {match_score}/100\nTraits (0-5): {trait_str}\n"
+            f"Overview: {overview or 'No overview available.'}")
+    resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=300,
+        system=_REVIEW_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+        output_config={"format": {"type": "json_schema", "schema": _REVIEW_SCHEMA}},
+    )
+    text = next((b.text for b in resp.content if b.type == "text"), "{}")
+    data = json.loads(text)
+    return {
+        "verdict": (data.get("verdict") or "").strip(),
+        "risk": (data.get("risk") or "").strip(),
+        "watch_plan": (data.get("watch_plan") or "").strip(),
+    }
+
+
 # --- Phase 4: cosine-based cache refresh ---
 
 async def refresh_recommendation_cache(client: httpx.AsyncClient):
@@ -454,7 +553,7 @@ async def refresh_recommendation_cache(client: httpx.AsyncClient):
                 print(f"On-the-fly tag failed for {slug}: {e}")
                 continue
         match_score = score_candidate(tags, profile) if profile else 50
-        scored.append((match_score, rec))
+        scored.append((match_score, rec, tags))
 
     # Deterministic ordering: score desc, Trakt rating as a tiny tiebreaker, then slug.
     scored.sort(
@@ -463,25 +562,51 @@ async def refresh_recommendation_cache(client: httpx.AsyncClient):
     )
     top = scored[:40]
 
-    # Enrich with TMDB (poster + providers) and build cache rows.
+    # Reuse cached Henry-voice reviews when the score barely moved (avoid re-calling the
+    # API for every candidate on every refresh). Keyed by slug.
+    old_reviews = {r['trakt_slug']: r for r in db.get_all_cached_recommendations()}
+
     new_cache = []
-    for match_score, rec in top:
+    for match_score, rec, tags in top:
+        slug = rec.get('ids', {}).get('slug', '')
         title = rec.get('title', '')
         tmdb_id, poster_url = await search_tmdb(title, client)
         services = await get_tmdb_providers(tmdb_id, client) if tmdb_id else []
         overview = rec.get('overview') or ''
         if len(overview) > 300:
             overview = overview[:300] + '...'
+
+        # Math-based explanations (deterministic, no API).
+        why_rec, why_fail = explain_match(tags, profile)
+
+        # Henry-voice verdict/risk/plan: reuse if cached and score is within 5; else generate.
+        prev = old_reviews.get(slug)
+        if prev and prev.get('verdict') and abs((prev.get('match_score') or -999) - match_score) <= 5:
+            verdict, risk, watch_plan = prev['verdict'], prev.get('risk'), prev.get('watch_plan')
+        else:
+            try:
+                rv = await ai_review(title, overview, match_score, tags)
+                verdict, risk, watch_plan = rv['verdict'], rv['risk'], rv['watch_plan']
+            except Exception as e:
+                print(f"Review generation failed for {slug}: {e}")
+                verdict = risk = watch_plan = None
+
         new_cache.append({
-            'trakt_slug': rec.get('ids', {}).get('slug', ''),
+            'trakt_slug': slug,
             'title': title,
             'year': rec.get('year'),
             'overview': overview,
             'poster_url': poster_url,
             'score': match_score,
-            'source_show': '',  # superseded by the math-based "why" coming in Phase 5
+            'source_show': '',  # superseded by the math-based "why" below
             'genres': ",".join(rec.get('genres', [])),
             'streaming_services': ",".join(services),
+            'match_score': match_score,
+            'verdict': verdict,
+            'risk': risk,
+            'watch_plan': watch_plan,
+            'why_recommended': why_rec,
+            'why_might_fail': why_fail,
         })
 
     if new_cache:
