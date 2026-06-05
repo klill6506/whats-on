@@ -1,9 +1,22 @@
+import asyncio
+import json
+import math
 import os
 import random
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env (next to this file) before importing modules that read env vars at import
+# time (database.py). Explicit path so it works regardless of cwd. override=True so the
+# local .env wins over a stale/empty shell var of the same name. On Render there's no
+# .env file, so this is a harmless no-op and Render's injected env vars are untouched.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+
+import anthropic
 import httpx
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -34,6 +47,80 @@ CACHE_MAX_AGE = timedelta(hours=12)
 
 VALID_STATUSES = {'watching', 'current', 'hiatus', 'dropped'}
 VALID_SERVICES = USER_SERVICES | {'Disney+', 'Other'}
+
+
+# --- AI taste tagger (Anthropic) ---
+
+# Default to the most capable model; override with ANTHROPIC_MODEL (e.g. claude-haiku-4-5
+# to save cost). Model IDs are current as of the claude-api skill cache (2026-05).
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
+
+_anthropic_client = None
+
+def get_anthropic() -> anthropic.AsyncAnthropic:
+    """Lazily build the async Anthropic client. Raises if the key is missing so the
+    failure is obvious rather than a 500 deep in a request."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is not set. Add it to .env (local) or the Render "
+                "dashboard (production) before tagging or generating reviews."
+            )
+        # Some environments export an empty ANTHROPIC_AUTH_TOKEN, which the SDK would
+        # turn into an illegal 'Bearer ' header (preferred over x-api-key). Drop it so
+        # the explicit api_key is used.
+        if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        # max_retries above the default 2 — a full cache refresh fires dozens of calls and
+        # transient 529 (overloaded) responses are common in a batch.
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=5)
+    return _anthropic_client
+
+
+# JSON schema for structured output. Numeric min/max aren't supported by structured
+# outputs, so the 0-5 bound is enforced in code via db.clamp_tags().
+_TAG_SCHEMA = {
+    "type": "object",
+    "properties": {d: {"type": "integer"} for d in db.TAG_DIMENSIONS},
+    "required": db.TAG_DIMENSIONS,
+    "additionalProperties": False,
+}
+
+_TAG_SYSTEM = """You are a TV taste analyst. Rate a show on 11 descriptive dimensions, each an integer 0-5.
+
+These describe HOW MUCH of a trait the show has — they are NOT good/bad judgments:
+- crime: criminal activity, investigations, the underworld
+- legal: courtroom, lawyers, the justice system
+- comedy: how funny / light it is
+- darkness: bleak, grim, morally heavy tone
+- prestige: elevated "prestige TV" craft and ambition
+- pace: how propulsive it is (0 = slow burn, 5 = breakneck)
+- sentimentality: emotional, heart-tugging, earnest feeling
+- mystery: puzzles, whodunits, unanswered questions driving the plot
+- ending_quality: how satisfying and well-constructed its episode/season endings are
+- violence: on-screen violence and intensity
+- rewatchability: how much it rewards repeat viewing
+
+0 = none of this trait, 5 = saturated with it. Return only the JSON object with all 11 integer fields."""
+
+
+async def ai_tag_show(title, overview, genres) -> dict:
+    """Ask Claude to score a show on the 11 taste dimensions. Returns a validated,
+    clamped dict of dimension -> int(0-5)."""
+    client = get_anthropic()
+    genre_str = ", ".join(genres) if genres else "unknown"
+    user = f"Title: {title}\nGenres: {genre_str}\nOverview: {overview or 'No overview available.'}"
+    resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=400,
+        system=_TAG_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+        output_config={"format": {"type": "json_schema", "schema": _TAG_SCHEMA}},
+    )
+    text = next((b.text for b in resp.content if b.type == "text"), "{}")
+    return db.clamp_tags(json.loads(text))
 
 
 # --- Pydantic models ---
@@ -117,18 +204,31 @@ def trakt_headers():
         "Content-Type": "application/json"
     }
 
+def _pick_trakt_match(results, title):
+    """Choose the best show from Trakt search results. Prefer an exact (case-insensitive)
+    title match, keeping Trakt's own ordering (results come back ranked by relevance/
+    popularity, so the well-known show wins). Fall back to Trakt's top result if no exact
+    match. Avoids the old data[0] behavior that matched e.g. 'Landman' -> 'man-land'."""
+    shows = [r["show"] for r in (results or []) if r.get("show")]
+    if not shows:
+        return None
+    q = title.strip().lower()
+    for s in shows:
+        if (s.get("title") or "").strip().lower() == q:
+            return s
+    return shows[0]
+
 async def search_trakt(title: str, client: httpx.AsyncClient = None):
     close = client is None
     client = client or httpx.AsyncClient(timeout=15.0)
     try:
         resp = await client.get(
             f"{TRAKT_BASE_URL}/search/show",
-            params={"query": title},
+            params={"query": title, "limit": 10},
             headers=trakt_headers()
         )
-        data = resp.json()
-        if data:
-            show = data[0]["show"]
+        show = _pick_trakt_match(resp.json(), title)
+        if show:
             return {
                 "trakt_id": show.get("ids", {}).get("trakt"),
                 "trakt_slug": show.get("ids", {}).get("slug"),
@@ -265,111 +365,280 @@ async def get_tmdb_providers(tmdb_id: int, client: httpx.AsyncClient) -> list:
 
 # ============ RECOMMENDATION ENGINE ============
 
+# --- Phase 3: signed taste profile ---
+
+def compute_profile(rated):
+    """Pure: given [(rating, tags_dict), ...] build the signed taste vector.
+    weight = rating - 3; profile[dim] = sum(weight * tag[dim]) / sum(|weight|).
+    Returns {} when there's no usable signal (denominator 0)."""
+    num = {d: 0.0 for d in db.TAG_DIMENSIONS}
+    denom = 0.0
+    for rating, tags in rated:
+        if rating is None or tags is None:
+            continue
+        w = rating - 3
+        denom += abs(w)
+        for d in db.TAG_DIMENSIONS:
+            num[d] += w * (tags.get(d) or 0)
+    if denom == 0:
+        return {}
+    return {d: num[d] / denom for d in db.TAG_DIMENSIONS}
+
+
+def build_taste_profile():
+    """Signed taste profile from rated library shows that have tags."""
+    tags_by_slug = {t['trakt_slug']: t for t in db.get_all_tags()}
+    rated = []
+    for show in db.get_all_shows():
+        slug, rating = show.get('trakt_slug'), show.get('rating')
+        if not slug or rating is None:
+            continue
+        tags = tags_by_slug.get(slug)
+        if tags:
+            rated.append((rating, tags))
+    return compute_profile(rated)
+
+
+def cosine_similarity(a, b):
+    """Cosine similarity over the taste dimensions, in [-1, 1]. 0 if either vector is zero."""
+    dims = db.TAG_DIMENSIONS
+    dot = sum((a.get(d) or 0) * (b.get(d) or 0) for d in dims)
+    na = math.sqrt(sum((a.get(d) or 0) ** 2 for d in dims))
+    nb = math.sqrt(sum((b.get(d) or 0) ** 2 for d in dims))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def score_candidate(candidate_tags, profile):
+    """Map cosine similarity [-1, 1] to a 0-100 match score. 50 = orthogonal/neutral."""
+    cos = cosine_similarity(candidate_tags, profile)
+    return round((cos + 1) / 2 * 100)
+
+
+# --- Phase 5: explanations (math) + AI review (Henry voice) ---
+
+DIM_LABELS = {
+    'crime': 'crime', 'legal': 'legal/courtroom', 'comedy': 'comedy',
+    'darkness': 'a dark tone', 'prestige': 'prestige polish', 'pace': 'a fast pace',
+    'sentimentality': 'sentimentality', 'mystery': 'mystery',
+    'ending_quality': 'strong endings', 'violence': 'violence',
+    'rewatchability': 'rewatchability',
+}
+
+
+def _join_labels(dims_list):
+    labels = [DIM_LABELS.get(d, d) for d in dims_list]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + ", and " + labels[-1]
+
+
+def explain_match(candidate_tags, profile):
+    """Deterministic, math-derived (why_recommended, why_might_fail) from the candidate's
+    tag vector vs the signed taste profile. No AI — cheap and trustworthy."""
+    if not profile:
+        return ("", "")
+    dims = db.TAG_DIMENSIONS
+    c = {d: candidate_tags.get(d) or 0 for d in dims}
+    p = {d: profile.get(d) or 0 for d in dims}
+
+    # Recommend: candidate delivers a trait Ken likes (profile positive, candidate high).
+    liked = sorted([d for d in dims if p[d] > 0.3 and c[d] >= 3],
+                   key=lambda d: p[d] * c[d], reverse=True)[:3]
+    why = f"High on {_join_labels(liked)}." if liked else "A change of pace from your usual."
+
+    # Might fail: (a) leans into a disliked trait; (b) light on a strongly-liked trait.
+    disliked = sorted([d for d in dims if p[d] < -0.3 and c[d] >= 3],
+                      key=lambda d: p[d] * c[d])[:2]
+    missing = sorted([d for d in dims if p[d] > 1.0 and c[d] <= 2],
+                     key=lambda d: p[d], reverse=True)[:2]
+    parts = []
+    if disliked:
+        parts.append(f"leans into {_join_labels(disliked)}")
+    if missing:
+        parts.append(f"lighter on {_join_labels(missing)} than your usual")
+    if parts:
+        s = "; ".join(parts)
+        why_not = s[0].upper() + s[1:] + "."
+    else:
+        why_not = "Nothing obvious working against it."
+    return (why, why_not)
+
+
+_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string"},
+        "risk": {"type": "string"},
+        "watch_plan": {"type": "string"},
+    },
+    "required": ["verdict", "risk", "watch_plan"],
+    "additionalProperties": False,
+}
+
+_REVIEW_SYSTEM = """You are Henry, the wry mascot of Ken's personal TV tracker. Voice: dry,
+classy, a little snarky, never cruel, economical. You're given a show, how strongly it
+matches Ken's taste (0-100), and its trait scores (0-5). Write three short lines:
+- verdict: one sentence on whether it's his lane and why (blunt is fine).
+- risk: one sentence naming the single most likely reason he bails.
+- watch_plan: one sentence of concrete advice (e.g. "Give it two episodes; bail with honor if you're not in.").
+Each line under ~25 words. No emoji, no preamble. Return only the JSON."""
+
+
+async def ai_review(title, overview, match_score, tags):
+    """One Henry-voice call -> {verdict, risk, watch_plan}. Cached by the caller; never
+    invoked on page load."""
+    client = get_anthropic()
+    trait_str = ", ".join(f"{d} {tags.get(d, 0)}" for d in db.TAG_DIMENSIONS)
+    user = (f"Show: {title}\nMatch score: {match_score}/100\nTraits (0-5): {trait_str}\n"
+            f"Overview: {overview or 'No overview available.'}")
+    resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=300,
+        system=_REVIEW_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+        output_config={"format": {"type": "json_schema", "schema": _REVIEW_SCHEMA}},
+    )
+    text = next((b.text for b in resp.content if b.type == "text"), "{}")
+    data = json.loads(text)
+    return {
+        "verdict": (data.get("verdict") or "").strip(),
+        "risk": (data.get("risk") or "").strip(),
+        "watch_plan": (data.get("watch_plan") or "").strip(),
+    }
+
+
+# --- Phase 4: cosine-based cache refresh ---
+
 async def refresh_recommendation_cache(client: httpx.AsyncClient):
-    """Rebuild the recommendation cache using taste-aware scoring."""
+    """Rebuild the recommendation cache by scoring Trakt 'related' candidates against
+    Ken's signed taste profile via cosine similarity. Deterministic: no random factor and
+    no popularity bonus baked into the score (Trakt community rating is a tiebreaker only)."""
     shows = db.get_all_shows()
     if not shows:
         return
 
-    existing_slugs = {s.get('trakt_slug') for s in shows if s.get('trakt_slug')}
+    profile = build_taste_profile()
+
     existing_titles = {s['title'].lower() for s in shows}
-    dismissed_slugs = db.get_dismissed_slugs()
-    excluded = existing_slugs | dismissed_slugs
+    excluded = {s.get('trakt_slug') for s in shows if s.get('trakt_slug')} | db.get_dismissed_slugs()
 
-    # Step 1: Build weighted genre profile from ALL shows
-    genre_weights = defaultdict(float)
-    shows_with_slugs = []
-    for show in shows:
-        slug = show.get('trakt_slug')
-        if not slug:
-            # Try to find slug via search
-            info = await search_trakt(show['title'], client)
-            if info and info.get('trakt_slug'):
-                slug = info['trakt_slug']
-                db.update_show(show['id'], trakt_slug=slug)
-            else:
-                continue
-        rating = show.get('rating') or 2  # unrated defaults to 2
-        shows_with_slugs.append((show, slug, rating))
+    # Candidate discovery: Trakt "related" for the top-rated library shows.
+    rated_with_slug = [s for s in shows if s.get('trakt_slug') and s.get('rating')]
+    top_shows = sorted(rated_with_slug, key=lambda s: s['rating'], reverse=True)[:5]
 
-        details = await get_trakt_show_details(slug, client)
-        if details:
-            for genre in details.get('genres', []):
-                genre_weights[genre] += rating
-
-    # Step 2: Fetch related shows for top-rated shows (collaborative filtering)
-    top_shows = sorted(shows_with_slugs, key=lambda x: x[2], reverse=True)[:5]
-    candidates = {}  # slug -> {data + _score}
-
-    for show, slug, rating in top_shows:
-        related = await fetch_trakt_related(slug, client, limit=15)
+    candidates = {}  # slug -> rec dict from Trakt
+    for show in top_shows:
+        related = await fetch_trakt_related(show['trakt_slug'], client, limit=15)
         for rec in related:
-            rec_slug = rec.get("ids", {}).get("slug")
-            if not rec_slug or rec_slug in excluded or rec.get("title", "").lower() in existing_titles:
+            rec_slug = rec.get('ids', {}).get('slug')
+            if not rec_slug or rec_slug in excluded or rec.get('title', '').lower() in existing_titles:
                 continue
-            if rec_slug not in candidates:
-                candidates[rec_slug] = rec
-                candidates[rec_slug]['_score'] = 0.0
-                candidates[rec_slug]['_source'] = show['title']
-            # Source weight: higher-rated source shows produce stronger signal
-            candidates[rec_slug]['_score'] += rating * 2
+            candidates.setdefault(rec_slug, rec)
 
-    # Step 3: Score by genre affinity
-    max_genre_weight = max(genre_weights.values()) if genre_weights else 1
+    # Score each candidate by cosine similarity to the profile; tag on the fly if missing.
+    scored = []
     for slug, rec in candidates.items():
-        genres = rec.get('genres', [])
-        genre_score = sum(genre_weights.get(g, 0) for g in genres) / max_genre_weight
-        rec['_score'] += genre_score * 5
-        # Small random factor for rotation variety
-        rec['_score'] += random.random() * 2
-        # Bonus for highly-rated shows on Trakt
-        trakt_rating = rec.get('rating', 0) or 0
-        if trakt_rating >= 8.0:
-            rec['_score'] += 3
-        elif trakt_rating >= 7.0:
-            rec['_score'] += 1
+        tags = db.get_tags(slug)
+        if not tags:
+            try:
+                t = await ai_tag_show(rec.get('title', ''), rec.get('overview', ''), rec.get('genres', []))
+                db.upsert_tags(slug, source='ai', **t)
+                tags = db.get_tags(slug)
+            except Exception as e:
+                print(f"On-the-fly tag failed for {slug}: {e}")
+                continue
+        match_score = score_candidate(tags, profile) if profile else 50
+        scored.append((match_score, rec, tags))
 
-    # Step 4: Sort and take top 40 for TMDB enrichment
-    sorted_candidates = sorted(candidates.values(), key=lambda x: x.get('_score', 0), reverse=True)[:40]
+    # Deterministic ordering: score desc, Trakt rating as a tiny tiebreaker, then slug.
+    scored.sort(
+        key=lambda x: (x[0], x[1].get('rating') or 0, x[1].get('ids', {}).get('slug', '')),
+        reverse=True,
+    )
+    top = scored[:40]
 
-    # Step 5: Enrich with TMDB (poster + streaming providers)
+    # Reuse cached Henry-voice reviews when the score barely moved (avoid re-calling the
+    # API for every candidate on every refresh). Keyed by slug.
+    old_reviews = {r['trakt_slug']: r for r in db.get_all_cached_recommendations()}
+
     new_cache = []
-    for rec in sorted_candidates:
+    for match_score, rec, tags in top:
+        slug = rec.get('ids', {}).get('slug', '')
         title = rec.get('title', '')
         tmdb_id, poster_url = await search_tmdb(title, client)
-
-        services = []
-        if tmdb_id:
-            services = await get_tmdb_providers(tmdb_id, client)
-
-        genres = ",".join(rec.get('genres', []))
-        streaming = ",".join(services)
-        overview = rec.get('overview', '') or ''
+        services = await get_tmdb_providers(tmdb_id, client) if tmdb_id else []
+        overview = rec.get('overview') or ''
         if len(overview) > 300:
             overview = overview[:300] + '...'
 
+        # Math-based explanations (deterministic, no API).
+        why_rec, why_fail = explain_match(tags, profile)
+
+        # Henry-voice verdict/risk/plan: reuse if cached and score is within 5; else generate.
+        prev = old_reviews.get(slug)
+        if prev and prev.get('verdict') and abs((prev.get('match_score') or -999) - match_score) <= 5:
+            verdict, risk, watch_plan = prev['verdict'], prev.get('risk'), prev.get('watch_plan')
+        else:
+            try:
+                rv = await ai_review(title, overview, match_score, tags)
+                verdict, risk, watch_plan = rv['verdict'], rv['risk'], rv['watch_plan']
+            except Exception as e:
+                print(f"Review generation failed for {slug}: {e}")
+                verdict = risk = watch_plan = None
+
         new_cache.append({
-            'trakt_slug': rec.get('ids', {}).get('slug', ''),
+            'trakt_slug': slug,
             'title': title,
             'year': rec.get('year'),
             'overview': overview,
             'poster_url': poster_url,
-            'score': rec.get('_score', 0),
-            'source_show': rec.get('_source', ''),
-            'genres': genres,
-            'streaming_services': streaming,
+            'score': match_score,
+            'source_show': '',  # superseded by the math-based "why" below
+            'genres': ",".join(rec.get('genres', [])),
+            'streaming_services': ",".join(services),
+            'match_score': match_score,
+            'verdict': verdict,
+            'risk': risk,
+            'watch_plan': watch_plan,
+            'why_recommended': why_rec,
+            'why_might_fail': why_fail,
         })
 
-    # Step 6: Write to cache (only replace after new data is ready)
     if new_cache:
         db.clear_recommendation_cache()
         for item in new_cache:
             db.insert_cached_recommendation(**item)
 
-    print(f"Recommendation cache refreshed: {len(new_cache)} candidates")
+    print(f"Recommendation cache refreshed: {len(new_cache)} candidates "
+          f"(profile dims set: {len(profile)})")
 
 
 # ============ PAGES ============
+
+_refresh_in_progress = False
+
+
+async def _background_refresh(client):
+    """Run a cache refresh without blocking the request that triggered it. Guarded so
+    concurrent page loads don't fire overlapping refreshes (a refresh makes dozens of
+    API calls)."""
+    global _refresh_in_progress
+    if _refresh_in_progress:
+        return
+    _refresh_in_progress = True
+    try:
+        await refresh_recommendation_cache(client)
+    except Exception as e:
+        print(f"Background refresh failed: {e}")
+    finally:
+        _refresh_in_progress = False
+
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -400,11 +669,12 @@ async def home(request: Request):
     # --- Recommendations (server-side, cached) ---
     recommendations = []
     try:
-        # Check if cache needs refresh
+        # If the cache is stale, refresh it in the BACKGROUND so the page never blocks on
+        # the recommendation engine's API calls (tagging + reviews). This request serves
+        # whatever is currently cached; the next load picks up the fresh data.
         cache_age = db.get_cache_age()
-        if not cache_age or (datetime.now() - cache_age) > CACHE_MAX_AGE:
-            client = _client(request)
-            await refresh_recommendation_cache(client)
+        if (not cache_age or (datetime.now() - cache_age) > CACHE_MAX_AGE) and not _refresh_in_progress:
+            asyncio.create_task(_background_refresh(_client(request)))
 
         recs, total = db.get_cached_recommendations(USER_SERVICES, limit=6, offset=0)
         if total > 6:
@@ -504,6 +774,61 @@ async def api_refresh_recommendations(request: Request):
     client = _client(request)
     await refresh_recommendation_cache(client)
     return {"message": "Recommendations refreshed"}
+
+
+@app.post("/api/admin/retag")
+async def admin_retag(request: Request):
+    """Tag every library show + cached candidate that's missing taste tags.
+    Idempotent — slugs already in show_tags are skipped. Run once locally to seed
+    the existing library (pennies). Requires ANTHROPIC_API_KEY."""
+    client = _client(request)
+    tagged, skipped, failed = 0, 0, 0
+    results = []
+
+    # --- Library shows ---
+    for show in db.get_all_shows():
+        slug = show.get('trakt_slug')
+        if not slug:
+            info = await search_trakt(show['title'], client)
+            if info and info.get('trakt_slug'):
+                slug = info['trakt_slug']
+                db.update_show(show['id'], trakt_slug=slug)
+        if not slug:
+            failed += 1
+            results.append({"title": show['title'], "status": "no_trakt_slug"})
+            continue
+        if db.get_tags(slug):
+            skipped += 1
+            continue
+        details = await get_trakt_show_details(slug, client)
+        overview = details.get('overview') if details else None
+        genres = details.get('genres', []) if details else []
+        try:
+            tags = await ai_tag_show(show['title'], overview, genres)
+            db.upsert_tags(slug, source='ai', **tags)
+            tagged += 1
+            results.append({"title": show['title'], "slug": slug, **tags})
+        except Exception as e:
+            print(f"Tagging failed for {show['title']}: {e}")
+            failed += 1
+            results.append({"title": show['title'], "status": f"error: {e}"})
+
+    # --- Cached recommendation candidates ---
+    for rec in db.get_all_cached_recommendations():
+        slug = rec.get('trakt_slug')
+        if not slug or db.get_tags(slug):
+            skipped += 1
+            continue
+        genres = [g.strip() for g in (rec.get('genres') or '').split(',') if g.strip()]
+        try:
+            tags = await ai_tag_show(rec['title'], rec.get('overview'), genres)
+            db.upsert_tags(slug, source='ai', **tags)
+            tagged += 1
+        except Exception as e:
+            print(f"Tagging failed for candidate {rec.get('title')}: {e}")
+            failed += 1
+
+    return {"tagged": tagged, "skipped": skipped, "failed": failed, "shows": results}
 
 
 # ============ FORM HANDLERS (web UI) ============

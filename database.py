@@ -9,6 +9,17 @@ ALLOWED_FIELDS = {
     'notes', 'tmdb_id', 'poster_url', 'trakt_slug', 'updated_at'
 }
 
+# Phase 5 review/explanation columns added to recommendation_cache (name, type).
+# Listed once so both the CREATE blocks and the migrations stay in sync.
+_REC_REVIEW_COLUMNS = [
+    ('match_score', 'INTEGER'),
+    ('verdict', 'TEXT'),
+    ('risk', 'TEXT'),
+    ('watch_plan', 'TEXT'),
+    ('why_recommended', 'TEXT'),
+    ('why_might_fail', 'TEXT'),
+]
+
 # Check for PostgreSQL (Render) or SQLite (local)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -79,6 +90,12 @@ if DATABASE_URL:
                     source_show TEXT,
                     genres TEXT,
                     streaming_services TEXT,
+                    match_score INTEGER,
+                    verdict TEXT,
+                    risk TEXT,
+                    watch_plan TEXT,
+                    why_recommended TEXT,
+                    why_might_fail TEXT,
                     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -86,9 +103,21 @@ if DATABASE_URL:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS show_tags (
+                    trakt_slug TEXT PRIMARY KEY,
+                    crime INTEGER, legal INTEGER, comedy INTEGER, darkness INTEGER, prestige INTEGER,
+                    pace INTEGER, sentimentality INTEGER, mystery INTEGER, ending_quality INTEGER,
+                    violence INTEGER, rewatchability INTEGER,
+                    source TEXT,
+                    tagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             # Migrate: add rating column if missing (existing DBs)
             _migrate_add_column(cur, 'shows', 'rating', 'INTEGER')
+            # Migrate: Phase 5 review/explanation columns on recommendation_cache
+            for _col, _typ in _REC_REVIEW_COLUMNS:
+                _migrate_add_column(cur, 'recommendation_cache', _col, _typ)
 
     def _migrate_add_column(cur, table, column, col_type):
         try:
@@ -164,6 +193,12 @@ else:
                     source_show TEXT,
                     genres TEXT,
                     streaming_services TEXT,
+                    match_score INTEGER,
+                    verdict TEXT,
+                    risk TEXT,
+                    watch_plan TEXT,
+                    why_recommended TEXT,
+                    why_might_fail TEXT,
                     cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -171,11 +206,25 @@ else:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS show_tags (
+                    trakt_slug TEXT PRIMARY KEY,
+                    crime INTEGER, legal INTEGER, comedy INTEGER, darkness INTEGER, prestige INTEGER,
+                    pace INTEGER, sentimentality INTEGER, mystery INTEGER, ending_quality INTEGER,
+                    violence INTEGER, rewatchability INTEGER,
+                    source TEXT,
+                    tagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             # Migrate: add rating column if missing (existing DBs)
             columns = [row[1] for row in conn.execute("PRAGMA table_info(shows)").fetchall()]
             if 'rating' not in columns:
                 conn.execute("ALTER TABLE shows ADD COLUMN rating INTEGER")
+            # Migrate: Phase 5 review/explanation columns on recommendation_cache
+            rec_cols = [row[1] for row in conn.execute("PRAGMA table_info(recommendation_cache)").fetchall()]
+            for _col, _typ in _REC_REVIEW_COLUMNS:
+                if _col not in rec_cols:
+                    conn.execute(f"ALTER TABLE recommendation_cache ADD COLUMN {_col} {_typ}")
 
     def _dict(row):
         return dict(row) if row else None
@@ -279,6 +328,66 @@ def get_dismissed_recommendations():
         return [_dict(row) for row in cur.fetchall()]
 
 
+# ============ Taste Tags ============
+
+# The 11 taste dimensions, each scored 0-5. Descriptive (how much of the trait
+# the show has), not good/bad — polarity is learned from Ken's ratings.
+TAG_DIMENSIONS = [
+    'crime', 'legal', 'comedy', 'darkness', 'prestige', 'pace',
+    'sentimentality', 'mystery', 'ending_quality', 'violence', 'rewatchability'
+]
+
+
+def clamp_tags(data):
+    """Coerce a dict of dimension -> value into valid 0-5 integers for every
+    dimension. Missing or non-numeric values become 0. Pure function — the
+    validation step the AI tagger must run before storing."""
+    out = {}
+    for d in TAG_DIMENSIONS:
+        try:
+            v = int(data.get(d, 0))
+        except (TypeError, ValueError):
+            v = 0
+        out[d] = max(0, min(5, v))
+    return out
+
+
+def get_tags(slug):
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM show_tags WHERE trakt_slug = {_ph()}", (slug,))
+        return _dict(cur.fetchone())
+
+
+def get_all_tags():
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM show_tags")
+        return [_dict(row) for row in cur.fetchall()]
+
+
+def delete_tags(slug):
+    with get_db() as conn:
+        conn.cursor().execute(f"DELETE FROM show_tags WHERE trakt_slug = {_ph()}", (slug,))
+
+
+def upsert_tags(slug, source='ai', **dims):
+    """Insert or update tags for a slug. Idempotent — re-tagging overwrites the
+    existing row. Both engines support ON CONFLICT upsert (Postgres + SQLite >= 3.24)."""
+    dims = clamp_tags(dims)
+    cols = TAG_DIMENSIONS
+    col_list = ", ".join(['trakt_slug'] + cols + ['source'])
+    ph = _ph(len(cols) + 2)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols + ['source'])
+    sql = f"""
+        INSERT INTO show_tags ({col_list}) VALUES ({ph})
+        ON CONFLICT (trakt_slug) DO UPDATE SET {updates}, tagged_at = CURRENT_TIMESTAMP
+    """
+    params = [slug] + [dims[c] for c in cols] + [source]
+    with get_db() as conn:
+        conn.cursor().execute(sql, params)
+
+
 # ============ Recommendation Cache ============
 
 def clear_recommendation_cache():
@@ -286,14 +395,20 @@ def clear_recommendation_cache():
         conn.cursor().execute("DELETE FROM recommendation_cache")
 
 def insert_cached_recommendation(trakt_slug, title, year, overview, poster_url,
-                                  score, source_show, genres, streaming_services):
+                                  score, source_show, genres, streaming_services,
+                                  match_score=None, verdict=None, risk=None,
+                                  watch_plan=None, why_recommended=None, why_might_fail=None):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(f"""
             INSERT INTO recommendation_cache
-                (trakt_slug, title, year, overview, poster_url, score, source_show, genres, streaming_services)
-            VALUES ({_ph(9)})
-        """, (trakt_slug, title, year, overview, poster_url, score, source_show, genres, streaming_services))
+                (trakt_slug, title, year, overview, poster_url, score, source_show,
+                 genres, streaming_services, match_score, verdict, risk, watch_plan,
+                 why_recommended, why_might_fail)
+            VALUES ({_ph(15)})
+        """, (trakt_slug, title, year, overview, poster_url, score, source_show,
+              genres, streaming_services, match_score, verdict, risk, watch_plan,
+              why_recommended, why_might_fail))
 
 def get_cache_age():
     """Returns the cached_at of the newest row, or None if empty."""
@@ -339,6 +454,14 @@ def get_recommendation_count():
         cur.execute("SELECT COUNT(*) as cnt FROM recommendation_cache")
         row = cur.fetchone()
         return row['cnt'] if DATABASE_URL else row[0]
+
+
+def get_all_cached_recommendations():
+    """Raw cached recs (unfiltered) — used by the tagger to find candidates missing tags."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recommendation_cache")
+        return [_dict(row) for row in cur.fetchall()]
 
 
 # ============ Dedup ============
