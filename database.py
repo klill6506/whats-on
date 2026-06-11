@@ -120,10 +120,10 @@ if DATABASE_URL:
                 _migrate_add_column(cur, 'recommendation_cache', _col, _typ)
 
     def _migrate_add_column(cur, table, column, col_type):
-        try:
-            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-        except Exception:
-            pass  # column already exists
+        # IF NOT EXISTS instead of try/except: a failed statement aborts the whole
+        # Postgres transaction, which would silently roll back every later migration
+        # AND the CREATE TABLEs in this same init_db() transaction.
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}")
 
     def _dict(row):
         return dict(row) if row else None

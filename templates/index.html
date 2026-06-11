@@ -318,7 +318,9 @@
         <div class="show-row">
             {% for rec in recommendations %}
             <div class="show-card rec-card" style="border: 2px solid #a855f7;" onclick="toggleRecOverlay(this, event)">
-                {% if rec.match_score is not none %}
+                {# 'is defined' too: a rec row from a not-yet-migrated DB has no match_score
+                   key at all, and Jinja's Undefined passes 'is not none' then crashes on >= #}
+                {% if rec.match_score is defined and rec.match_score is not none %}
                 <div class="match-badge" style="color: {{ '#34d399' if rec.match_score >= 75 else ('#fbbf24' if rec.match_score >= 50 else '#9ca3af') }};">
                     {{ rec.match_score }}<span class="match-label">MATCH</span>
                 </div>
@@ -337,7 +339,7 @@
                 </div>
                 <div class="rec-overlay">
                     <div>
-                        <div class="text-white font-semibold text-sm mb-1">{{ rec.title }}{% if rec.match_score is not none %} <span class="text-purple-400">· {{ rec.match_score }} match</span>{% endif %}</div>
+                        <div class="text-white font-semibold text-sm mb-1">{{ rec.title }}{% if rec.match_score is defined and rec.match_score is not none %} <span class="text-purple-400">· {{ rec.match_score }} match</span>{% endif %}</div>
                         {% if rec.verdict %}<div class="rec-verdict">“{{ rec.verdict }}”</div>{% endif %}
                         {% if rec.why_recommended %}<div class="rec-why rec-why-good">✓ {{ rec.why_recommended }}</div>{% endif %}
                         {% if rec.why_might_fail %}<div class="rec-why rec-why-bad">⚠ {{ rec.why_might_fail }}</div>{% endif %}
