@@ -697,6 +697,15 @@ async def home(request: Request):
 
 # ============ JSON API ============
 
+@app.get("/health")
+async def health():
+    """Liveness + DB reachability, for deployment health checks (Coolify/Render)."""
+    try:
+        db.get_recommendation_count()
+        return {"status": "ok", "database": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"database unavailable: {e}")
+
 @app.get("/api/shows")
 async def api_shows():
     return db.get_all_shows()
@@ -829,6 +838,23 @@ async def admin_retag(request: Request):
             failed += 1
 
     return {"tagged": tagged, "skipped": skipped, "failed": failed, "shows": results}
+
+
+@app.get("/api/admin/export")
+async def admin_export():
+    """Full data dump (all tables) for migrating between deployments/engines."""
+    return db.export_all()
+
+
+@app.post("/api/admin/import")
+async def admin_import(request: Request):
+    """Replace ALL data with a dump produced by /api/admin/export. Destructive by
+    design (deployment migration); the import is a single transaction."""
+    data = await request.json()
+    if not isinstance(data, dict) or 'shows' not in data:
+        raise HTTPException(status_code=400, detail="body must be an /api/admin/export dump (missing 'shows')")
+    counts = db.import_all(data)
+    return {"imported": counts}
 
 
 # ============ FORM HANDLERS (web UI) ============

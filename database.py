@@ -498,6 +498,64 @@ def dedup_shows():
     return removed
 
 
+# ============ Export / Import (deployment migration) ============
+
+# Parent tables first so foreign keys (watch_history.show_id) resolve on import.
+_EXPORT_TABLES = ['shows', 'watch_history', 'dismissed_recommendations',
+                  'show_tags', 'recommendation_cache', 'meta']
+
+def _table_columns(cur, table):
+    if DATABASE_URL:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+            (table,))
+        return [r['column_name'] for r in cur.fetchall()]
+    cur.execute(f"PRAGMA table_info({table})")
+    return [r[1] for r in cur.fetchall()]
+
+def export_all():
+    """Dump every table as JSON-able dicts, for moving the DB between deployments
+    (and between engines — the dual schema uses the same column names)."""
+    out = {}
+    with get_db() as conn:
+        cur = conn.cursor()
+        for table in _EXPORT_TABLES:
+            cur.execute(f"SELECT * FROM {table}")
+            out[table] = [_dict(row) for row in cur.fetchall()]
+    return out
+
+def import_all(data):
+    """Replace the contents of every known table with the rows from export_all().
+    Unknown keys in rows (schema drift) are dropped; unknown tables are ignored.
+    Runs in one transaction — an import either fully applies or not at all."""
+    counts = {}
+    with get_db() as conn:
+        cur = conn.cursor()
+        for table in _EXPORT_TABLES:
+            rows = data.get(table)
+            if rows is None:
+                continue
+            cols = set(_table_columns(cur, table))
+            cur.execute(f"DELETE FROM {table}")
+            n = 0
+            for row in rows:
+                keep = {k: v for k, v in row.items() if k in cols}
+                if not keep:
+                    continue
+                names = ', '.join(keep)
+                cur.execute(
+                    f"INSERT INTO {table} ({names}) VALUES ({_ph(len(keep))})",
+                    tuple(keep.values()))
+                n += 1
+            counts[table] = n
+            # Postgres sequences don't follow explicit-id inserts; bump them past max(id)
+            if DATABASE_URL and 'id' in cols:
+                cur.execute(
+                    f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                    f"COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)")
+    return counts
+
+
 # ============ Seed ============
 
 def seed_kens_shows():
