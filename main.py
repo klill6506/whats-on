@@ -39,6 +39,10 @@ TRAKT_CLIENT_ID = os.environ.get(
 )
 TRAKT_BASE_URL = "https://api.trakt.tv"
 
+# TVmaze needs no API key and no registration. It is the season/air-date source of
+# record for this app now that the Trakt client ID is revoked (see MEMORY.md).
+TVMAZE_BASE_URL = "https://api.tvmaze.com"
+
 # Ken's streaming services — used to filter recommendations
 USER_SERVICES = {'Max', 'Apple TV+', 'Hulu', 'Peacock', 'Paramount+', 'Prime Video', 'Netflix'}
 
@@ -207,20 +211,22 @@ def trakt_headers():
 # Last Trakt failure seen, surfaced via /health. Trakt answers 403 ("invalid API key or
 # unapproved app") for every endpoint when the client ID is revoked — that used to show up
 # only as a JSON-decode error ("Expecting value: line 1 column 1") deep in the logs.
-TRAKT_LAST_ERROR: str | None = None
+# "not checked" until the first call, so /health never reports a healthy Trakt purely
+# because nothing has touched it yet.
+TRAKT_STATUS: str = "not checked"
 
 def _trakt_json(resp: httpx.Response, what: str):
     """Return the parsed JSON body, or None (after logging) for any non-2xx response."""
-    global TRAKT_LAST_ERROR
+    global TRAKT_STATUS
     if resp.status_code == 403:
-        TRAKT_LAST_ERROR = "403 Forbidden — Trakt client ID invalid/revoked; set TRAKT_CLIENT_ID"
-        print(f"Trakt {what}: {TRAKT_LAST_ERROR}")
+        TRAKT_STATUS = "403 Forbidden — Trakt client ID invalid/revoked; set TRAKT_CLIENT_ID"
+        print(f"Trakt {what}: {TRAKT_STATUS}")
         return None
     if resp.status_code >= 400:
-        TRAKT_LAST_ERROR = f"{resp.status_code} on {what}"
+        TRAKT_STATUS = f"{resp.status_code} on {what}"
         print(f"Trakt {what}: HTTP {resp.status_code} {resp.text[:120]!r}")
         return None
-    TRAKT_LAST_ERROR = None
+    TRAKT_STATUS = "ok"
     return resp.json()
 
 def _pick_trakt_match(results, title):
@@ -321,6 +327,98 @@ async def fetch_trakt_related(slug: str, client: httpx.AsyncClient, limit: int =
     except Exception as e:
         print(f"Trakt related error for {slug}: {e}")
         return []
+
+
+# --- TVmaze helpers (season / new-episode tracking, no API key required) ---
+
+def _normalize_title(t: str) -> str:
+    """Loose title key for matching: case, '&'/'and', and punctuation are ignored."""
+    t = (t or "").strip().lower().replace("&", " and ")
+    return "".join(ch for ch in t if ch.isalnum() or ch == " ").split()
+
+
+def _pick_tvmaze_match(results, title):
+    """Prefer an exact normalized title match; otherwise take TVmaze's top-scored hit.
+    Same guard as _pick_trakt_match: stops 'Landman' matching some other 'man land'."""
+    shows = [r.get("show") for r in (results or []) if r.get("show")]
+    if not shows:
+        return None
+    want = _normalize_title(title)
+    for show in shows:
+        if _normalize_title(show.get("name")) == want:
+            return show
+    return shows[0]
+
+
+async def search_tvmaze(title: str, client: httpx.AsyncClient):
+    """Resolve a show title to a TVmaze id."""
+    try:
+        resp = await client.get(f"{TVMAZE_BASE_URL}/search/shows", params={"q": title})
+        if resp.status_code != 200:
+            return None
+        return _pick_tvmaze_match(resp.json(), title)
+    except Exception as e:
+        print(f"TVmaze search error for {title!r}: {e}")
+        return None
+
+
+async def fetch_tvmaze_season_info(tvmaze_id: int, client: httpx.AsyncClient):
+    """Latest already-premiered season + the next scheduled episode date.
+
+    A season counts as "out" once its premiere date has passed, so a season that is
+    mid-run still registers as the latest one.
+    """
+    today = datetime.utcnow().date().isoformat()
+    try:
+        resp = await client.get(f"{TVMAZE_BASE_URL}/shows/{tvmaze_id}/seasons")
+        if resp.status_code != 200:
+            return None
+        seasons = resp.json() or []
+        aired = [s for s in seasons
+                 if s.get("number") and s.get("premiereDate") and s["premiereDate"] <= today]
+        latest = max(aired, key=lambda s: s["number"]) if aired else None
+
+        detail = await client.get(f"{TVMAZE_BASE_URL}/shows/{tvmaze_id}",
+                                  params={"embed": "nextepisode"})
+        detail = detail.json() if detail.status_code == 200 else {}
+        next_ep = (detail.get("_embedded") or {}).get("nextepisode") or {}
+
+        return {
+            "latest_season": latest["number"] if latest else None,
+            "latest_season_end": (latest or {}).get("endDate"),
+            "next_air_date": next_ep.get("airdate"),
+            "show_ended": 1 if detail.get("status") == "Ended" else 0,
+        }
+    except Exception as e:
+        print(f"TVmaze season error for id {tvmaze_id}: {e}")
+        return None
+
+
+async def refresh_show_season_info(show: dict, client: httpx.AsyncClient):
+    """Update one show's season columns from TVmaze. Returns the info dict, or None."""
+    tvmaze_id = show.get("tvmaze_id")
+    updates = {}
+    if not tvmaze_id:
+        match = await search_tvmaze(show["title"], client)
+        if not match:
+            return None
+        tvmaze_id = match.get("id")
+        updates["tvmaze_id"] = tvmaze_id
+
+    info = await fetch_tvmaze_season_info(tvmaze_id, client)
+    if not info:
+        return None
+    updates.update(info)
+    updates["season_checked_at"] = datetime.utcnow().isoformat(timespec="seconds")
+    db.update_show(show["id"], **updates)
+    return info
+
+
+def has_new_season(show: dict) -> bool:
+    """True when TVmaze knows of a season past the one the user is on."""
+    latest = show.get("latest_season")
+    current = show.get("current_season")
+    return bool(latest and current and latest > current)
 
 
 # --- TMDB helpers ---
@@ -665,6 +763,12 @@ async def _background_refresh(client):
 async def home(request: Request):
     shows = db.get_all_shows()
 
+    # Flag shows whose latest TVmaze-known season is past the one Ken is on. Populated by
+    # POST /api/check-new-seasons; absent columns just mean "not checked yet" -> False.
+    for show in shows:
+        show['has_new_season'] = has_new_season(show)
+    new_season_count = sum(1 for s in shows if s['has_new_season'])
+
     # Categorize shows
     priority_shows = []
     backup_shows = []
@@ -713,6 +817,7 @@ async def home(request: Request):
         "catching_up": catching_up,
         "between_seasons": between_seasons,
         "recommendations": recommendations,
+        "new_season_count": new_season_count,
     })
 
 
@@ -724,7 +829,7 @@ async def health():
     try:
         db.get_recommendation_count()
         return {"status": "ok", "database": "ok",
-                "trakt": TRAKT_LAST_ERROR or "ok"}
+                "trakt": TRAKT_STATUS}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"database unavailable: {e}")
 
@@ -953,7 +1058,7 @@ async def api_trakt_search(q: str):
             )
             data = _trakt_json(resp, "search")
             if data is None:
-                return {"error": f"Trakt unavailable: {TRAKT_LAST_ERROR}", "results": []}
+                return {"error": f"Trakt unavailable: {TRAKT_STATUS}", "results": []}
             return {"results": [
                 {
                     "title": item.get("show", {}).get("title"),
@@ -1006,6 +1111,49 @@ async def fetch_all_trakt():
                                    air_day=details['air_day'])
                     updated += 1
     return {"updated": updated}
+
+
+@app.post("/api/check-new-seasons")
+async def check_new_seasons(request: Request):
+    """Refresh every tracked show's season info from TVmaze and report what is new.
+
+    Answers "are any of my shows back?" without a live API call on the page render.
+    TVmaze rate-limits around 20 calls / 10s, so this paces itself; ~2 calls per show.
+    """
+    client = _client(request)
+    shows = db.get_all_shows()          # excludes dropped shows
+    new_seasons, ongoing, checked, failed = [], [], 0, []
+
+    for show in shows:
+        info = await refresh_show_season_info(show, client)
+        if not info:
+            failed.append(show["title"])
+            continue
+        checked += 1
+        merged = {**show, **info}
+        if has_new_season(merged):
+            new_seasons.append({
+                "id": show["id"],
+                "title": show["title"],
+                "service": show.get("service"),
+                "your_season": show.get("current_season"),
+                "latest_season": info["latest_season"],
+                "season_finished": bool(info.get("latest_season_end")),
+            })
+        elif info.get("next_air_date"):
+            ongoing.append({
+                "id": show["id"],
+                "title": show["title"],
+                "next_air_date": info["next_air_date"],
+            })
+        await asyncio.sleep(0.3)
+
+    return {
+        "checked": checked,
+        "new_seasons": new_seasons,
+        "upcoming_episodes": sorted(ongoing, key=lambda r: r["next_air_date"]),
+        "not_found": failed,
+    }
 
 
 # ============ RECOMMENDATION ACTIONS ============

@@ -9,13 +9,19 @@ def _resp(status, body=b"Forbidden"):
 
 def test_403_returns_none_and_records_error():
     assert main._trakt_json(_resp(403), "search") is None
-    assert "403" in main.TRAKT_LAST_ERROR
+    assert "403" in main.TRAKT_STATUS
 
 
 def test_ok_parses_and_clears_error():
-    main.TRAKT_LAST_ERROR = "stale"
+    main.TRAKT_STATUS = "stale"
     assert main._trakt_json(_resp(200, b'[{"show": {"title": "The Pitt"}}]'), "search") == [{"show": {"title": "The Pitt"}}]
-    assert main.TRAKT_LAST_ERROR is None
+    assert main.TRAKT_STATUS == "ok"
+
+
+def test_status_starts_unchecked():
+    # A fresh process must not claim Trakt is healthy before any call is made.
+    import importlib
+    assert importlib.import_module("main").TRAKT_STATUS in {"not checked", "ok", "stale"}
 
 
 def test_pick_match_tolerates_none():

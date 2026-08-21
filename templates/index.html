@@ -92,6 +92,20 @@
             border-radius: 3px;
             text-transform: uppercase;
         }
+        .season-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: #10b981;
+            color: white;
+            font-size: 0.55rem;
+            font-weight: 700;
+            padding: 2px 5px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            z-index: 6;
+            box-shadow: 0 0 0 2px rgba(16,185,129,0.25);
+        }
         .service-dot {
             width: 8px; height: 8px;
             border-radius: 50%;
@@ -207,8 +221,15 @@
         <div class="flex gap-2 overflow-x-auto pb-2">
             <button onclick="fetchAllPosters()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🖼️ Posters</button>
             <button onclick="fetchAllTrakt()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">📅 Air Days</button>
+            <button onclick="checkNewSeasons()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🆕 New Seasons</button>
             <button onclick="dedupShows()" class="flex-shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs border border-gray-700">🧹 Dedup</button>
         </div>
+        {% if new_season_count %}
+        <div class="mt-2 rounded-lg border border-emerald-600 bg-emerald-900/30 px-3 py-2 text-xs text-emerald-300">
+            🎉 <strong>{{ new_season_count }}</strong> show{{ 's' if new_season_count != 1 else '' }}
+            {{ 'have' if new_season_count != 1 else 'has' }} a new season out — look for the green badge.
+        </div>
+        {% endif %}
     </header>
 
     {% if priority_shows %}
@@ -375,7 +396,11 @@
         </h2>
         <div class="show-row">
             {% for show in between_seasons %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})" style="opacity: 0.5; filter: grayscale(50%);">
+            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})"
+                {% if not show.has_new_season %}style="opacity: 0.5; filter: grayscale(50%);"{% endif %}>
+                {% if show.has_new_season %}
+                <div class="season-badge">S{{ show.latest_season }} out</div>
+                {% endif %}
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -388,7 +413,9 @@
                 <div class="show-info">
                     <div class="show-title">{{ show.title }}</div>
                     <div class="show-meta">
-                        {% if show.notes %}{{ show.notes }}{% else %}Waiting for S{{ show.current_season + 1 }}{% endif %}
+                        {% if show.has_new_season %}S{{ show.latest_season }} ready to watch
+                        {% elif show.notes %}{{ show.notes }}
+                        {% else %}Waiting for S{{ show.current_season + 1 }}{% endif %}
                     </div>
                 </div>
             </div>
@@ -679,6 +706,29 @@
                 if (data.removed > 0) { alert('Removed ' + data.removed + ' duplicate(s)!'); location.reload(); }
                 else { alert('No duplicates found!'); }
             } catch (err) { alert('Error removing duplicates'); }
+        }
+
+        async function checkNewSeasons() {
+            try {
+                var response = await fetch('/api/check-new-seasons', { method: 'POST' });
+                var data = await response.json();
+                var found = data.new_seasons || [];
+                if (found.length) {
+                    var lines = found.map(function(s) {
+                        return '• ' + s.title + ': S' + s.latest_season +
+                               (s.season_finished ? ' (complete)' : ' (airing now)');
+                    });
+                    alert('New season' + (found.length > 1 ? 's' : '') + ' out:
+
+' + lines.join('
+'));
+                } else {
+                    var next = (data.upcoming_episodes || [])[0];
+                    alert(next ? 'Nothing new yet. Next episode: ' + next.title + ' on ' + next.next_air_date
+                               : 'No new seasons right now.');
+                }
+                location.reload();
+            } catch (err) { alert('Error checking for new seasons'); }
         }
 
         async function fetchAllPosters() {

@@ -6,8 +6,21 @@ from datetime import datetime
 ALLOWED_FIELDS = {
     'title', 'service', 'status', 'current_season', 'current_episode',
     'total_seasons', 'episodes_in_season', 'air_day', 'priority', 'rating',
-    'notes', 'tmdb_id', 'poster_url', 'trakt_slug', 'updated_at'
+    'notes', 'tmdb_id', 'poster_url', 'trakt_slug', 'updated_at',
+    'tvmaze_id', 'latest_season', 'latest_season_end', 'next_air_date',
+    'show_ended', 'season_checked_at',
 }
+
+# Season-tracking columns on `shows`, populated from TVmaze (no API key needed).
+# They answer "is a new season out?" without a live API call on the request path.
+_SHOW_SEASON_COLUMNS = [
+    ('tvmaze_id', 'INTEGER'),
+    ('latest_season', 'INTEGER'),       # highest season that has already premiered
+    ('latest_season_end', 'TEXT'),      # ISO date that season finished (null if still airing)
+    ('next_air_date', 'TEXT'),          # ISO date of the next scheduled episode, if any
+    ('show_ended', 'INTEGER'),          # 1 = series concluded, 0 = still running
+    ('season_checked_at', 'TEXT'),      # ISO timestamp of the last TVmaze check
+]
 
 # Phase 5 review/explanation columns added to recommendation_cache (name, type).
 # Listed once so both the CREATE blocks and the migrations stay in sync.
@@ -118,6 +131,9 @@ if DATABASE_URL:
             # Migrate: Phase 5 review/explanation columns on recommendation_cache
             for _col, _typ in _REC_REVIEW_COLUMNS:
                 _migrate_add_column(cur, 'recommendation_cache', _col, _typ)
+            # Migrate: TVmaze season-tracking columns on shows
+            for _col, _typ in _SHOW_SEASON_COLUMNS:
+                _migrate_add_column(cur, 'shows', _col, _typ)
 
     def _migrate_add_column(cur, table, column, col_type):
         # IF NOT EXISTS instead of try/except: a failed statement aborts the whole
@@ -225,6 +241,10 @@ else:
             for _col, _typ in _REC_REVIEW_COLUMNS:
                 if _col not in rec_cols:
                     conn.execute(f"ALTER TABLE recommendation_cache ADD COLUMN {_col} {_typ}")
+            # Migrate: TVmaze season-tracking columns on shows
+            for _col, _typ in _SHOW_SEASON_COLUMNS:
+                if _col not in columns:
+                    conn.execute(f"ALTER TABLE shows ADD COLUMN {_col} {_typ}")
 
     def _dict(row):
         return dict(row) if row else None
