@@ -12,3 +12,6 @@ CLAUDE.md
 MEMORY.md
 STATUS.md
 DECISIONS.md
+
+# Coolify webhook secret — never commit
+webhook_secret.txt

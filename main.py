@@ -204,6 +204,25 @@ def trakt_headers():
         "Content-Type": "application/json"
     }
 
+# Last Trakt failure seen, surfaced via /health. Trakt answers 403 ("invalid API key or
+# unapproved app") for every endpoint when the client ID is revoked — that used to show up
+# only as a JSON-decode error ("Expecting value: line 1 column 1") deep in the logs.
+TRAKT_LAST_ERROR: str | None = None
+
+def _trakt_json(resp: httpx.Response, what: str):
+    """Return the parsed JSON body, or None (after logging) for any non-2xx response."""
+    global TRAKT_LAST_ERROR
+    if resp.status_code == 403:
+        TRAKT_LAST_ERROR = "403 Forbidden — Trakt client ID invalid/revoked; set TRAKT_CLIENT_ID"
+        print(f"Trakt {what}: {TRAKT_LAST_ERROR}")
+        return None
+    if resp.status_code >= 400:
+        TRAKT_LAST_ERROR = f"{resp.status_code} on {what}"
+        print(f"Trakt {what}: HTTP {resp.status_code} {resp.text[:120]!r}")
+        return None
+    TRAKT_LAST_ERROR = None
+    return resp.json()
+
 def _pick_trakt_match(results, title):
     """Choose the best show from Trakt search results. Prefer an exact (case-insensitive)
     title match, keeping Trakt's own ordering (results come back ranked by relevance/
@@ -227,7 +246,7 @@ async def search_trakt(title: str, client: httpx.AsyncClient = None):
             params={"query": title, "limit": 10},
             headers=trakt_headers()
         )
-        show = _pick_trakt_match(resp.json(), title)
+        show = _pick_trakt_match(_trakt_json(resp, "search"), title)
         if show:
             return {
                 "trakt_id": show.get("ids", {}).get("trakt"),
@@ -253,7 +272,9 @@ async def get_trakt_show_details(slug: str, client: httpx.AsyncClient = None):
             params={"extended": "full"},
             headers=trakt_headers()
         )
-        show_data = show_resp.json()
+        show_data = _trakt_json(show_resp, f"show {slug}")
+        if not show_data:
+            return None
 
         next_ep_resp = await client.get(
             f"{TRAKT_BASE_URL}/shows/{slug}/next_episode",
@@ -296,7 +317,7 @@ async def fetch_trakt_related(slug: str, client: httpx.AsyncClient, limit: int =
             params={"limit": limit, "extended": "full"},
             headers=trakt_headers()
         )
-        return resp.json() if resp.status_code == 200 else []
+        return _trakt_json(resp, f"related {slug}") or []
     except Exception as e:
         print(f"Trakt related error for {slug}: {e}")
         return []
@@ -702,7 +723,8 @@ async def health():
     """Liveness + DB reachability, for deployment health checks (Coolify/Render)."""
     try:
         db.get_recommendation_count()
-        return {"status": "ok", "database": "ok"}
+        return {"status": "ok", "database": "ok",
+                "trakt": TRAKT_LAST_ERROR or "ok"}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"database unavailable: {e}")
 
@@ -929,7 +951,9 @@ async def api_trakt_search(q: str):
                 params={"query": q, "limit": 10},
                 headers=trakt_headers()
             )
-            data = resp.json()
+            data = _trakt_json(resp, "search")
+            if data is None:
+                return {"error": f"Trakt unavailable: {TRAKT_LAST_ERROR}", "results": []}
             return {"results": [
                 {
                     "title": item.get("show", {}).get("title"),
