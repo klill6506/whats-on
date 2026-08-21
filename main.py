@@ -415,10 +415,19 @@ async def refresh_show_season_info(show: dict, client: httpx.AsyncClient):
 
 
 def has_new_season(show: dict) -> bool:
-    """True when TVmaze knows of a season past the one the user is on."""
+    """True when TVmaze knows of a season past the one the user is on.
+
+    A show that has never been started is excluded. Watchlist entries sit at S1E1, so
+    without this guard every unstarted multi-season show would permanently claim a "new
+    season" — which would mean "this show has more than one season", not "something has
+    appeared since you last watched", and would drain the badge of meaning.
+    """
     latest = show.get("latest_season")
     current = show.get("current_season")
-    return bool(latest and current and latest > current)
+    if not (latest and current and latest > current):
+        return False
+    not_started = current == 1 and show.get("current_episode") == 1
+    return not not_started
 
 
 # --- TMDB helpers ---
