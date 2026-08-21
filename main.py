@@ -508,7 +508,10 @@ def build_taste_profile():
     """Signed taste profile from rated library shows that have tags."""
     tags_by_slug = {t['trakt_slug']: t for t in db.get_all_tags()}
     rated = []
-    for show in db.get_all_shows():
+    # Includes dropped shows on purpose: weight is (rating - 3), so a 1-2 star show Ken
+    # abandoned carries negative weight and is what pushes the profile away from that
+    # kind of show. Reading from get_all_shows() silently discarded exactly that signal.
+    for show in db.get_all_shows_any_status():
         slug, rating = show.get('trakt_slug'), show.get('rating')
         if not slug or rating is None:
             continue
@@ -644,8 +647,11 @@ async def refresh_recommendation_cache(client: httpx.AsyncClient):
 
     profile = build_taste_profile()
 
-    existing_titles = {s['title'].lower() for s in shows}
-    excluded = {s.get('trakt_slug') for s in shows if s.get('trakt_slug')} | db.get_dismissed_slugs()
+    # Exclusion spans dropped shows too — otherwise a show Ken quit gets recommended back.
+    # (Seeding below still uses `shows`, which is fine: it takes the top 5 by rating.)
+    all_tracked = db.get_all_shows_any_status()
+    existing_titles = {s['title'].lower() for s in all_tracked}
+    excluded = {s.get('trakt_slug') for s in all_tracked if s.get('trakt_slug')} | db.get_dismissed_slugs()
 
     # Candidate discovery: Trakt "related" for the top-rated library shows.
     rated_with_slug = [s for s in shows if s.get('trakt_slug') and s.get('rating')]
@@ -922,7 +928,13 @@ async def admin_retag(request: Request):
     results = []
 
     # --- Library shows ---
-    for show in db.get_all_shows():
+    # Dropped shows are included: build_taste_profile() reads them for their negative
+    # weight, and an untagged show contributes nothing however it is rated. Rows that are
+    # dropped AND unrated exist only as a never-recommend list, so they need no tags.
+    for show in db.get_all_shows_any_status():
+        if show.get('status') == 'dropped' and show.get('rating') is None:
+            skipped += 1
+            continue
         slug = show.get('trakt_slug')
         if not slug:
             info = await search_trakt(show['title'], client)

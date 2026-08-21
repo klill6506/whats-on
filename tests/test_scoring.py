@@ -93,3 +93,26 @@ def test_explain_match_flags_missing_liked_axis():
 
 def test_explain_match_empty_profile():
     assert main.explain_match(_tags(crime=5), {}) == ("", "")
+
+
+class TestDroppedShowsCountAsNegativeSignal:
+    """A show Ken rated 1-2 and dropped is his strongest push-away signal.
+
+    build_taste_profile() previously read from get_all_shows(), which filters out
+    dropped rows, so that signal was silently discarded.
+    """
+
+    def test_low_rating_pushes_profile_negative(self):
+        import main
+        loved = {d: 0 for d in __import__("database").TAG_DIMENSIONS}
+        hated = dict(loved)
+        loved["crime"] = 10
+        hated["comedy"] = 10
+        profile = main.compute_profile([(5, loved), (1, hated)])
+        assert profile["crime"] > 0, "loved dimension should pull positive"
+        assert profile["comedy"] < 0, "hated dimension should push negative"
+
+    def test_neutral_rating_contributes_nothing(self):
+        import main, database
+        tags = {d: 10 for d in database.TAG_DIMENSIONS}
+        assert main.compute_profile([(3, tags)]) == {}

@@ -268,6 +268,18 @@ def get_all_shows():
         """)
         return [_dict(row) for row in cur.fetchall()]
 
+def get_all_shows_any_status():
+    """Every show INCLUDING dropped ones.
+
+    get_all_shows() hides dropped rows because the home page shouldn't list them, but
+    taste-profile and recommendation-exclusion logic needs them: a show Ken abandoned is
+    the strongest negative signal he can give, and it must never be recommended back.
+    """
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM shows ORDER BY title ASC")
+        return [_dict(row) for row in cur.fetchall()]
+
 def get_show(show_id):
     with get_db() as conn:
         cur = conn.cursor()
