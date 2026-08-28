@@ -35,12 +35,12 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 
 TRAKT_CLIENT_ID = os.environ.get(
     "TRAKT_CLIENT_ID",
-    "947255b4c65a76d7d7f29ce500d333f22de5641dbc0bf1bd701c325acfa74434"
+    "sJl9zeC68GGJBPgQ8kIWu1dcqY-s-rkH5CzDrHQkB5o"
 )
 TRAKT_BASE_URL = "https://api.trakt.tv"
 
-# TVmaze needs no API key and no registration. It is the season/air-date source of
-# record for this app now that the Trakt client ID is revoked (see MEMORY.md).
+# TVmaze needs no API key and no registration. It stays the season/air-date source of
+# record even with Trakt working, since it survives Trakt client-ID revocations.
 TVMAZE_BASE_URL = "https://api.tvmaze.com"
 
 # Ken's streaming services — used to filter recommendations
