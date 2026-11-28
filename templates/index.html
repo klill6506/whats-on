@@ -239,7 +239,7 @@
         </h2>
         <div class="show-row">
             {% for show in priority_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})">
+            <div class="show-card" onclick='openEdit({{ show.id|tojson }}, {{ show.title|tojson }}, {{ show.current_season|tojson }}, {{ show.current_episode|tojson }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})'>
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -271,7 +271,7 @@
         </h2>
         <div class="show-row">
             {% for show in backup_shows %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})" style="opacity: 0.85">
+            <div class="show-card" onclick='openEdit({{ show.id|tojson }}, {{ show.title|tojson }}, {{ show.current_season|tojson }}, {{ show.current_episode|tojson }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})' style="opacity: 0.85">
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -303,7 +303,7 @@
         </h2>
         <div class="show-row">
             {% for show in catching_up %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})">
+            <div class="show-card" onclick='openEdit({{ show.id|tojson }}, {{ show.title|tojson }}, {{ show.current_season|tojson }}, {{ show.current_episode|tojson }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})'>
                 {% if show.poster_url %}
                 <img src="{{ show.poster_url }}" alt="{{ show.title }}" class="show-poster">
                 {% else %}
@@ -312,7 +312,7 @@
                 <div class="show-progress" style="background: rgba(59, 130, 246, 0.9);">
                     S{{ show.current_season }}E{{ show.current_episode }}
                 </div>
-                <button onclick="event.stopPropagation(); quickAction2('caught-up', {{ show.id }}, {{ show.title|tojson }})"
+                <button onclick='event.stopPropagation(); quickAction2("caught-up", {{ show.id|tojson }}, {{ show.title|tojson }})'
                     class="quick-action-btn" style="position:absolute;top:8px;left:8px;background:rgba(59,130,246,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
                     ✓ Caught Up
                 </button>
@@ -396,7 +396,7 @@
         </h2>
         <div class="show-row">
             {% for show in between_seasons %}
-            <div class="show-card" onclick="openEdit({{ show.id }}, {{ show.title|tojson }}, {{ show.current_season }}, {{ show.current_episode }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})"
+            <div class="show-card" onclick='openEdit({{ show.id|tojson }}, {{ show.title|tojson }}, {{ show.current_season|tojson }}, {{ show.current_episode|tojson }}, {{ show.service|tojson }}, {{ show.status|tojson }}, {{ show.rating|default(0)|tojson }})'
                 {% if not show.has_new_season %}style="opacity: 0.5; filter: grayscale(50%);"{% endif %}>
                 {% if show.has_new_season %}
                 <div class="season-badge">S{{ show.latest_season }} out</div>
@@ -406,7 +406,7 @@
                 {% else %}
                 <div class="show-poster-placeholder">📺</div>
                 {% endif %}
-                <button onclick="event.stopPropagation(); quickAction2('active', {{ show.id }}, {{ show.title|tojson }})"
+                <button onclick='event.stopPropagation(); quickAction2("active", {{ show.id|tojson }}, {{ show.title|tojson }})'
                     class="quick-action-btn" style="position:absolute;top:8px;right:8px;background:rgba(16,185,129,0.9);color:white;border:none;font-size:0.6rem;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer;z-index:5;">
                     🎉 New Season
                 </button>
@@ -718,10 +718,7 @@
                         return '• ' + s.title + ': S' + s.latest_season +
                                (s.season_finished ? ' (complete)' : ' (airing now)');
                     });
-                    alert('New season' + (found.length > 1 ? 's' : '') + ' out:
-
-' + lines.join('
-'));
+                    alert('New season' + (found.length > 1 ? 's' : '') + ' out:\n\n' + lines.join('\n'));
                 } else {
                     var next = (data.upcoming_episodes || [])[0];
                     alert(next ? 'Nothing new yet. Next episode: ' + next.title + ' on ' + next.next_air_date
